@@ -1,7 +1,7 @@
 # Item 15 test results: conservation officer sign in (web)
 
-DRAFT. Run on 14 October 2026 on Deangel's Victus (<OS>, Node LTS 22), on the `item-15-officer-auth`
-branch. Fill in every `TODO` and delete this line when done.
+Run on 15 October 2026 on Deangel's Victus (Windows 11, Node 24.21.0), on the `item-15-officer-auth`
+branch, against a test Supabase project made for this.
 
 ## What this item adds
 
@@ -47,26 +47,31 @@ Needs two test users in Supabase (Authentication, Users, "Auto confirm"). Their 
 | --- | --- | --- | --- | --- |
 | 1 | Dashboard | Opened `/dashboard` while signed out | Goes to `/login` | Pass |
 | 2 | Sign in | Pressed Sign in with both boxes empty | The browser asks for the email, nothing is sent | Pass |
-| 3 | Sign in | Right email, wrong password | "That email and password don't match an account." in red, and you stay on `/login` | TODO |
-| 4 | Sign in | Email that has no account | The same message as test 3, so it can't be used to find which emails exist | TODO |
-| 5 | Sign in | Signed in as the botanist | Opens `/dashboard` but shows "No access" with the email and role, and no staff data | TODO |
-| 6 | No access | Pressed Sign out | Goes to `/login`, and `/dashboard` redirects again | TODO |
+| 3 | Sign in | Right email, wrong password | "That email and password don't match an account." in red, and you stay on `/login` | Pass |
+| 4 | Sign in | Email that has no account | The same message as test 3, so it can't be used to find which emails exist | Pass |
+| 5 | Sign in | Signed in as the botanist | Opens `/dashboard` but shows "No access" with the email and role, and no staff data | Pass |
+| 6 | No access | Pressed Sign out | Goes to `/login`, and `/dashboard` redirects again | Pass |
 | 7 | Sign in | Signed in as the officer | Opens `/dashboard`. The sidebar shows the test user's name and "Conservation officer" | Pass, after fix 1 (officer reached the dashboard; sidebar text not re-checked) |
-| 8 | Overview | Looked at the greeting | "Good morning, <first name of the test user>" | TODO |
-| 9 | Dashboard | Opened `/dashboard/review`, `/dashboard/species` and `/dashboard/users` | All open while signed in | TODO |
-| 10 | Dashboard | Refreshed the page and closed and reopened the tab | Still signed in | TODO |
-| 11 | Sign out | Pressed Sign out in the sidebar | Goes to `/login` | TODO |
-| 12 | Sign out | Pressed the browser's back button | Goes back to `/login`, no staff page is shown | TODO |
-| 13 | Admin | Set a test user to `admin` and signed in | Opens the dashboard | TODO |
-| 14 | Profile missing | Signed in with a user that has no row in `profiles` | "No access", no crash | TODO |
+| 8 | Overview | Looked at the greeting | "Good morning, <first name of the test user>" | Pass |
+| 9 | Dashboard | Opened `/dashboard/review`, `/dashboard/species` and `/dashboard/users` | All open while signed in | Pass |
+| 10 | Dashboard | Refreshed the page and closed and reopened the tab | Still signed in | Pass |
+| 11 | Sign out | Pressed Sign out in the sidebar | Goes to `/login` | Pass |
+| 12 | Sign out | Pressed the browser's back button | Goes back to `/login`, no staff page is shown | Pass |
+| 13 | Admin | Set a test user to `admin` and signed in | Opens the dashboard | Not run |
+| 14 | Profile missing | Signed in with a user that has no row in `profiles` | "No access", no crash | Not run |
 | 15 | Small screen | Window 375 px wide: `/login`, "No access" and the dashboard top bar with Sign out | Nothing scrolls sideways | Partial: `/login` at 375 px has no sideways scroll. "No access" and the dashboard top bar not checked yet |
-| 16 | Console | Watched the browser console on every step above | No errors | TODO |
-| 17 | Not set up | Removed the Supabase values from `.env.local` and restarted | `/login` says sign in isn't set up and the boxes are greyed out. `/dashboard` still redirects to `/login` | TODO |
+| 16 | Console | Watched the browser console on every step above | No errors | Partial: only `/login` was watched, and it showed just dev server hot reload messages. The other steps were not watched |
+| 17 | Not set up | Removed the Supabase values from `.env.local` and restarted | `/login` says sign in isn't set up and the boxes are greyed out. `/dashboard` still redirects to `/login` | Not run |
 
 ## Security check
 
-TODO: run `npm audit` and `npm audit --omit=dev` in `web/` and note what changed after adding
-`@supabase/ssr` and `@supabase/supabase-js`.
+`npm audit` in `web/` on 15 Oct 2026 after adding `@supabase/ssr` and `@supabase/supabase-js`.
+
+**Packages the site runs on** (`npm audit --omit=dev`): nothing found.
+
+**Dev tools:** the same 5 high that the item 13 results describe (one `braces` advisory counted
+once per package in the ESLint chain). The two Supabase packages added nothing. Don't run
+`npm audit fix --force`.
 
 - The proxy is only the first gate. The role check is in `dashboard/layout.tsx` through
   `getSession()`, which asks Supabase who the user is on the server (`getUser()`), not just
@@ -77,6 +82,10 @@ TODO: run `npm audit` and `npm audit --omit=dev` in `web/` and note what changed
   allow any signed in user to change species and review records. That's item 4, and it needs
   fixing before real data goes in. A botanist who can't open the dashboard can still call the API
   directly until then.
+- The signup trigger in `001_initial_schema.sql` copies `role` from the new user's metadata, so with
+  public sign ups on, anyone could sign up as an `admin`. We turned off "Allow new users to sign
+  up" in the test project. Andy's schema should ignore the role from metadata, and the team's
+  project needs the same setting.
 - The staff pages still send exact plant points to the browser. That's now behind a sign in and a
   role check, but the reports CSV should still be built on the server (item 21).
 
@@ -86,6 +95,7 @@ TODO: run `npm audit` and `npm audit --omit=dev` in `web/` and note what changed
 | --- | --- | --- |
 | Row Level Security | Item 4 isn't done, so the database doesn't check roles yet | Re-test with the botanist account against the API once item 4 lands |
 | Password reset, sign up, invites | Not part of this item. Accounts are made by an administrator | Item 4 and Sprint #2 |
+| Admin and no profile (tests 13 and 14), unconfigured server (test 17) | Not run in this round | Run them before Sprint #2 |
 | Expired sessions | The session cookie is refreshed by the proxy, but we didn't wait for a token to expire | Check after an hour of idle time |
 | Real phones | 375 px was only tested in a desktop browser | Try Safari on an iPhone and Chrome on an Android phone |
 | Team check | One other teammate has to approve the pull request | Ask for a review |
