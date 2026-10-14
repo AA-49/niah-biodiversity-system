@@ -45,13 +45,13 @@ Needs two test users in Supabase (Authentication, Users, "Auto confirm"). Their 
 
 | # | Screen | What we did | What should happen | Result |
 | --- | --- | --- | --- | --- |
-| 1 | Dashboard | Opened `/dashboard` while signed out | Goes to `/login` | TODO |
-| 2 | Sign in | Pressed Sign in with both boxes empty | The browser asks for the email, nothing is sent | TODO |
+| 1 | Dashboard | Opened `/dashboard` while signed out | Goes to `/login` | Pass |
+| 2 | Sign in | Pressed Sign in with both boxes empty | The browser asks for the email, nothing is sent | Pass |
 | 3 | Sign in | Right email, wrong password | "That email and password don't match an account." in red, and you stay on `/login` | TODO |
 | 4 | Sign in | Email that has no account | The same message as test 3, so it can't be used to find which emails exist | TODO |
 | 5 | Sign in | Signed in as the botanist | Opens `/dashboard` but shows "No access" with the email and role, and no staff data | TODO |
 | 6 | No access | Pressed Sign out | Goes to `/login`, and `/dashboard` redirects again | TODO |
-| 7 | Sign in | Signed in as the officer | Opens `/dashboard`. The sidebar shows the test user's name and "Conservation officer" | TODO |
+| 7 | Sign in | Signed in as the officer | Opens `/dashboard`. The sidebar shows the test user's name and "Conservation officer" | Pass, after fix 1 (officer reached the dashboard; sidebar text not re-checked) |
 | 8 | Overview | Looked at the greeting | "Good morning, <first name of the test user>" | TODO |
 | 9 | Dashboard | Opened `/dashboard/review`, `/dashboard/species` and `/dashboard/users` | All open while signed in | TODO |
 | 10 | Dashboard | Refreshed the page and closed and reopened the tab | Still signed in | TODO |
@@ -59,7 +59,7 @@ Needs two test users in Supabase (Authentication, Users, "Auto confirm"). Their 
 | 12 | Sign out | Pressed the browser's back button | Goes back to `/login`, no staff page is shown | TODO |
 | 13 | Admin | Set a test user to `admin` and signed in | Opens the dashboard | TODO |
 | 14 | Profile missing | Signed in with a user that has no row in `profiles` | "No access", no crash | TODO |
-| 15 | Small screen | Window 375 px wide: `/login`, "No access" and the dashboard top bar with Sign out | Nothing scrolls sideways | TODO |
+| 15 | Small screen | Window 375 px wide: `/login`, "No access" and the dashboard top bar with Sign out | Nothing scrolls sideways | Partial: `/login` at 375 px has no sideways scroll. "No access" and the dashboard top bar not checked yet |
 | 16 | Console | Watched the browser console on every step above | No errors | TODO |
 | 17 | Not set up | Removed the Supabase values from `.env.local` and restarted | `/login` says sign in isn't set up and the boxes are greyed out. `/dashboard` still redirects to `/login` | TODO |
 
@@ -92,4 +92,7 @@ TODO: run `npm audit` and `npm audit --omit=dev` in `web/` and note what changed
 
 ## Fixed while testing
 
-TODO: list anything you fixed during testing, or write "Nothing yet".
+1. The officer signed in but saw "No access" with no role. `001_initial_schema.sql` turns on Row Level
+   Security for `profiles` but has no policy for it, so the website couldn't read the user's own
+   role. Added `supabase/003_profiles_read_own.sql`, which lets a signed in user read only their own
+   row. Andy's item 14 schema needs the same policy.
