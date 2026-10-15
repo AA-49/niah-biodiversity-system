@@ -25,8 +25,8 @@ Item numbers match the Initial Release Schedule in the proposal. Tick items off 
 
 - [ ] 13. Web Platform Skeleton & Dashboard (clickable wireframe is in, see [test results](test-results/item-13-web-wireframe.md). Angel and Andy to check it before we tick it)
 - [ ] 14. Plant Database Schema & CRUD Operations
-- [x] 15. Conservation Officer Authentication (Web) ([test results](test-results/item-15-officer-auth.md))
-- [ ] 16. Plant Information Display & Search (Basic)
+- [ ] 15. Conservation Officer Authentication (Web)
+- [x] 16. Plant Information Display & Search (Basic) ([test results](test-results/item-16-plant-search.md))
 
 ## Cybersecurity & Data Protection (Jason)
 

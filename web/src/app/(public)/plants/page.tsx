@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/page-header";
-import { publishedForSpecies } from "@/data/records";
-import { hidesLocation, species } from "@/data/species";
+import { hidesLocation } from "@/data/species";
 import { IUCN } from "@/lib/iucn";
+import { getPublishedCounts } from "@/lib/records-db";
+import { getSpeciesList } from "@/lib/species-db";
 import { PlantSearch, type PlantSummary } from "./plant-search";
 
 export const metadata: Metadata = {
@@ -16,6 +17,11 @@ export default async function PlantsPage({
   const { q } = await searchParams;
   const initialQuery = (Array.isArray(q) ? q[0] : q) ?? "";
 
+  const [species, counts] = await Promise.all([
+    getSpeciesList(),
+    getPublishedCounts(),
+  ]);
+
   // Only what the list needs goes to the browser. No records, no coordinates.
   const plants: PlantSummary[] = species.map((s) => ({
     slug: s.slug,
@@ -28,7 +34,7 @@ export default async function PlantsPage({
     threatened: IUCN[s.iucn].threatened,
     sarawakProtected: s.sarawakProtected,
     hidesLocation: hidesLocation(s),
-    tagged: publishedForSpecies(s.slug).length,
+    tagged: counts[s.slug] ?? 0,
   }));
 
   return (
