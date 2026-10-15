@@ -4,9 +4,9 @@ The website for the Digital Plant Knowledge System. It has two sides: public pag
 look up the plants of Niah National Park, and a dashboard where SFC staff review records, manage
 species and keep an eye on the sensors. It's built with Next.js 16 (App Router) and Tailwind CSS 4.
 
-Right now this is a clickable wireframe for item 13, so we have something to show at the Sprint 1
-review. Every screen is in place and runs on mock data from `src/data/`. Nothing talks to Supabase
-yet and nothing is saved, so refreshing a page puts it back how it was.
+The original item 13 wireframe is still the visual baseline, but staff sign in and the public plant
+list/detail pages now read from Supabase for items 14 to 16. Other dashboard screens remain mock
+data and refreshing them puts them back how they were.
 
 | Side | Screens |
 | --- | --- |
@@ -21,12 +21,14 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:3000. Nothing uses Supabase yet, so you can skip the `.env.local` step
-in the main README for now.
+Then open http://localhost:3000. The public pages and staff sign in use Supabase when configured,
+so copy `.env.example` to `.env.local` and fill in the project URL and publishable key. The app
+accepts both `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` and the Supabase export
+names `SUPABASE_URL`/`SUPABASE_PUBLISHABLE_KEY`. Without them `/login` says sign in isn't set up
+and `/dashboard` sends you back to `/login`.
 
 For the demo, start at http://localhost:3000/screens. It lists every screen in the order we show
-them, with what works on each one. The pink strip at the top of every page links there too. The
-sign in page has no password. Its button just opens the dashboard.
+them, with what works on each one. The pink strip at the top of every page links there too.
 
 ## What's where
 
@@ -61,7 +63,6 @@ planned for, so it's clear what's real during the demo. The item numbers match t
 
 | Item | What goes in | Where |
 | --- | --- | --- |
-| 2, 15 | Real sign in with Supabase Auth, so only staff can open the dashboard | Staff sign in, the whole dashboard |
 | 4 | Invites and changing someone's role | Users and roles |
 | 12 | QR codes that really scan, printed for each tag | Scan a tag, tag pages |
 | 14 | A real database instead of the files in `src/data`, and saving new species | Everywhere |
@@ -78,6 +79,8 @@ planned for, so it's clear what's real during the demo. The item numbers match t
 - All the data is made up. The coordinates sit around the park HQ, the names are fake and the
   emails use example.com. Never put the real location of a threatened or protected plant in mock
   data, screenshots or anything public.
+- Public plant pages query the coordinate-free `species_public` and `records_public` views. Keep
+  exact coordinates in server-only staff workflows and never select them into a public page response.
 - A species hides its exact spot if it's threatened on the IUCN Red List (VU, EN or CR) or
   protected in Sarawak. See `hidesLocation()` in `src/data/species.ts`. Public pages only get a
   rough area: the server snaps the point to a 0.004 degree grid square (about 440 m at Niah) in

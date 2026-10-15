@@ -14,24 +14,17 @@ import {
 } from "@/components/plant-bits";
 import { SketchMap } from "@/components/sketch-map";
 import { Planned } from "@/components/tape";
-import { publishedForSpecies } from "@/data/records";
-import { getSpecies, hidesLocation, species } from "@/data/species";
+import { hidesLocation } from "@/data/species";
 import { formatDate, plural } from "@/lib/format";
 import { roughAreas } from "@/lib/geo";
 import { IUCN } from "@/lib/iucn";
+import { getPublishedRecordsForSpecies, getSpeciesBySlug } from "@/lib/species-db";
 import { tagCode } from "@/lib/tags";
-
-// Only the six mock species have pages, anything else is a 404
-export const dynamicParams = false;
-
-export function generateStaticParams() {
-  return species.map((s) => ({ slug: s.slug }));
-}
 
 export async function generateMetadata({
   params,
 }: PageProps<"/plants/[slug]">): Promise<Metadata> {
-  const plant = getSpecies((await params).slug);
+  const plant = await getSpeciesBySlug((await params).slug);
   if (!plant) return {};
   return { title: plant.commonNames[0], description: plant.summary };
 }
@@ -48,13 +41,13 @@ function LabelRow({ term, children }: { term: string; children: ReactNode }) {
 export default async function PlantPage({
   params,
 }: PageProps<"/plants/[slug]">) {
-  const plant = getSpecies((await params).slug);
+  const plant = await getSpeciesBySlug((await params).slug);
   if (!plant) notFound();
 
   const name = plant.commonNames[0];
   const otherNames = plant.commonNames.slice(1);
   const hidden = hidesLocation(plant);
-  const tagged = publishedForSpecies(plant.slug);
+  const tagged = await getPublishedRecordsForSpecies(plant.slug);
 
   // Exact points stay on the server. For hidden species the map only ever
   // gets the snapped grid squares.

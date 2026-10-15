@@ -3,7 +3,8 @@ import Link from "next/link";
 import { Icon } from "@/components/icon";
 import { ConditionBadge } from "@/components/plant-bits";
 import { SketchMap } from "@/components/sketch-map";
-import { DEMO_USER_ID, getPerson } from "@/data/people";
+import { getPerson } from "@/data/people";
+import { getSession } from "@/lib/auth";
 import { records } from "@/data/records";
 import { sensorAlerts, sensors } from "@/data/sensors";
 import { getSpecies, species } from "@/data/species";
@@ -23,8 +24,10 @@ function speciesName(slug: string) {
   return found.commonNames[0];
 }
 
-export default function OverviewPage() {
-  const me = getPerson(DEMO_USER_ID);
+export default async function OverviewPage() {
+  const session = await getSession();
+  const firstName =
+    session.status === "ok" ? session.name.split(" ")[0] : "there";
   const waiting = records.filter((r) => r.status === "waiting");
   const published = records.filter((r) => r.status === "published");
   const online = sensors.filter((s) => s.online).length;
@@ -44,7 +47,7 @@ export default function OverviewPage() {
       <header>
         <p className="eyebrow">{MOCK_TODAY_LABEL}</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight">
-          Good morning, {me.name.split(" ")[0]}
+          Good morning, {firstName}
         </h1>
         <p className="mt-1 text-moss">
           Here’s what needs you today. Everything on this dashboard is mock
