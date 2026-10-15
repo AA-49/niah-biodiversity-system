@@ -9,3 +9,7 @@ Rules from our design:
 - Row Level Security is turned on for every table.
 - Public users only see approved records, and only rough locations for endangered species.
 - The service role key never goes in the mobile app or browser code.
+- Public web reads use `species_public` and `records_public`; do not grant public
+  access to the base tables because they contain exact coordinates.
+- `004_security_hardening.sql` restricts writes by profile role and prevents
+  signup metadata from selecting a privileged role.

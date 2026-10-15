@@ -58,11 +58,11 @@ export async function getSpeciesList(): Promise<Species[]> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
-        .from("species")
+        .from("species_public")
         .select("*")
         .order("scientific_name", { ascending: true });
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data.map(mapRowToSpecies);
       }
     } catch {
@@ -80,13 +80,13 @@ export async function getSpeciesBySlug(slug: string): Promise<Species | null> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
-        .from("species")
+        .from("species_public")
         .select("*")
         .or(`slug.eq.${slug},id.eq.${slug}`)
         .maybeSingle();
 
-      if (!error && data) {
-        return mapRowToSpecies(data);
+      if (!error) {
+        return data ? mapRowToSpecies(data) : null;
       }
     } catch {
       // Fallback to mock data
@@ -106,7 +106,7 @@ export async function getPublishedRecordsForSpecies(
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
-        .from("records")
+        .from("records_public")
         .select("*")
         .eq("species_slug", slug)
         .eq("status", "published")
@@ -157,5 +157,47 @@ export async function insertSpecies(newSpecies: Partial<Species>): Promise<{ suc
     return { success: false, error: error.message };
   }
 
+  return { success: true };
+}
+
+export async function updateSpecies(
+  slug: string,
+  changes: Partial<Species>,
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { success: false, error: "Supabase is not configured." };
+  }
+
+  const row = {
+    scientific_name: changes.scientificName,
+    authority: changes.authority,
+    family: changes.family,
+    common_names: changes.commonNames,
+    iucn_code: changes.iucn,
+    sarawak_protected: changes.sarawakProtected,
+    newer_name: changes.newerName,
+    summary: changes.summary,
+    about: changes.about,
+    habitat: changes.habitat,
+    uses: changes.uses,
+  };
+
+  const { error } = await supabase
+    .from("species")
+    .update(row)
+    .eq("id", slug);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function deleteSpecies(
+  slug: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { success: false, error: "Supabase is not configured." };
+  }
+
+  const { error } = await supabase.from("species").delete().eq("id", slug);
+  if (error) return { success: false, error: error.message };
   return { success: true };
 }

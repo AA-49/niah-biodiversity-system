@@ -11,7 +11,7 @@ export async function getPublishedCounts(): Promise<Record<string, number>> {
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
-        .from("records")
+        .from("records_public")
         .select("species_slug")
         .eq("status", "published");
 
