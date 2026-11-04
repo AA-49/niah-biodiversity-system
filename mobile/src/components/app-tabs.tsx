@@ -8,7 +8,10 @@ import { useRecords } from '@/state/records-context';
 // or rename a tab, change both files.
 export default function AppTabs() {
   const theme = useTheme();
-  const { pendingCount } = useRecords();
+  const { pendingCount, mode } = useRecords();
+  // Visitors only read about plants, so the tabs for making and sending records are hidden.
+  // A phone that hasn't picked yet never gets here, because the welcome page shows instead.
+  const visitor = mode === 'visitor';
   // Only Android gets a solid bar colour. Leaving it unset on iOS keeps the system glass bar.
   const backgroundColor = Platform.OS === 'android' ? theme.backgroundElement : undefined;
 
@@ -34,7 +37,9 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="qrcode.viewfinder" md="qr_code_scanner" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="new-record">
+      {/* Each tab is listed once and hidden instead of left out, because the tab bar treats a
+          tab that isn't listed as one that doesn't exist. */}
+      <NativeTabs.Trigger name="new-record" hidden={visitor}>
         <NativeTabs.Trigger.Label>New Record</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf={{ default: 'plus.circle', selected: 'plus.circle.fill' }}
@@ -42,7 +47,7 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="records">
+      <NativeTabs.Trigger name="records" hidden={visitor}>
         <NativeTabs.Trigger.Label>My Records</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           sf={{ default: 'list.bullet.rectangle', selected: 'list.bullet.rectangle.fill' }}
@@ -53,11 +58,16 @@ export default function AppTabs() {
         </NativeTabs.Trigger.Badge>
       </NativeTabs.Trigger>
 
+      {/* Visitors have no account, so the same tab holds their settings instead. */}
       <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{visitor ? 'Settings' : 'Profile'}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }}
-          md="account_circle"
+          sf={
+            visitor
+              ? { default: 'gearshape', selected: 'gearshape.fill' }
+              : { default: 'person.crop.circle', selected: 'person.crop.circle.fill' }
+          }
+          md={visitor ? 'settings' : 'account_circle'}
         />
       </NativeTabs.Trigger>
     </NativeTabs>

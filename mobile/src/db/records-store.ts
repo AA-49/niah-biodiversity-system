@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { SpeciesOption } from '@/data/species-list';
 import type { UploadOutcome } from '@/sync/upload-row';
+import { isAppMode, type AppMode } from '@/types/app-mode';
 import type {
   PhotoOutcome,
   PhotoProblem,
@@ -79,6 +80,12 @@ export type RecordsStore = {
    * saved, nothing changes and the old list stays. Turns down an empty list.
    */
   replaceSpecies: (list: SpeciesOption[]) => Promise<void>;
+  /**
+   * Whether this phone is used by a visitor or by park staff, or null if nobody has picked yet.
+   * Anything else saved there also counts as not picked, so the app asks again.
+   */
+  loadMode: () => Promise<AppMode | null>;
+  saveMode: (mode: AppMode) => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -438,6 +445,22 @@ export async function openRecordsStore(): Promise<RecordsStore> {
           );
         }
       });
+    },
+
+    async loadMode() {
+      const row = await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM sync_meta WHERE key = 'app_mode'",
+      );
+      const value = row?.value;
+      return isAppMode(value) ? value : null;
+    },
+
+    async saveMode(mode) {
+      await db.runAsync(
+        `INSERT INTO sync_meta (key, value) VALUES ('app_mode', $value)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+        { $value: mode },
+      );
     },
 
     close() {

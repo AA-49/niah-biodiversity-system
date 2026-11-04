@@ -34,6 +34,8 @@ export const Icons = {
   info: symbol('info.circle', 'info'),
   notes: symbol('note.text', 'edit_note'),
   settings: symbol('gear', 'settings'),
+  visitor: symbol('figure.walk', 'hiking'),
+  staff: symbol('person.text.rectangle', 'badge'),
 };
 
 export type IconName = keyof typeof Icons;

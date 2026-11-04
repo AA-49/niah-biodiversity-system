@@ -1,4 +1,5 @@
 import type { SpeciesOption } from '@/data/species-list';
+import type { AppMode } from '@/types/app-mode';
 import type { PlantRecord, RecordPhoto } from '@/types/plant-record';
 
 import type { RecordsStore } from './records-store';
@@ -13,6 +14,7 @@ export async function openRecordsStore(): Promise<RecordsStore> {
   const photos: RecordPhoto[] = [];
   let species: SpeciesOption[] = [];
   let lastSynced: string | null = null;
+  let mode: AppMode | null = null;
 
   return {
     async loadRecords() {
@@ -135,6 +137,12 @@ export async function openRecordsStore(): Promise<RecordsStore> {
         throw new Error('A species in the list has no name or a repeated slug.');
       }
       species = [...list];
+    },
+    async loadMode() {
+      return mode;
+    },
+    async saveMode(newMode) {
+      mode = newMode;
     },
     async close() {},
   };

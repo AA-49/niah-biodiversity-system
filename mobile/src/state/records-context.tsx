@@ -14,11 +14,14 @@ import { useTheme } from '@/hooks/use-theme';
 import { matchesTag, newId, tagCodeFor } from '@/lib/id';
 import { deletePhotoFile, removeStrayPhotos } from '@/lib/photo-files';
 import type { UploadOutcome } from '@/sync/upload-row';
+import type { AppMode } from '@/types/app-mode';
 import type { NewPlantRecord, PhotoOutcome, PlantRecord, RecordPhoto } from '@/types/plant-record';
 
 // Records are saved in SQLite on the phone (src/db), so they're still there after the app
 // restarts or the phone runs out of battery. The species list downloaded when the phone syncs is
 // saved there too. src/state/sync-context.tsx uploads and downloads them, using the functions here.
+// Whether the phone is used by a visitor or by park staff is saved there as well, and it picks
+// the tabs.
 
 type RecordsContextValue = {
   /** Newest first. */
@@ -82,6 +85,13 @@ type RecordsContextValue = {
   species: SpeciesOption[];
   /** Saves a downloaded species list on the phone. If that fails it throws and nothing changes. */
   replaceSpecies: (list: SpeciesOption[]) => Promise<void>;
+  /**
+   * Whether a visitor or park staff use this phone. Null means nobody has picked yet, and then the
+   * app asks before showing anything else.
+   */
+  mode: AppMode | null;
+  /** Saves the pick on the phone, then switches the app over. If saving fails it throws. */
+  setMode: (mode: AppMode) => Promise<void>;
 };
 
 type StoreState =
@@ -94,6 +104,7 @@ type StoreState =
       saved: PlantRecord[];
       photos: RecordPhoto[];
       species: SpeciesOption[];
+      mode: AppMode | null;
     };
 
 const OPEN_FAILED = "Couldn't open the records saved on this phone.";
@@ -105,6 +116,23 @@ function failureReason(error: unknown) {
     return 'too-new';
   }
   return error instanceof DatabaseLockedError ? 'locked' : 'other';
+}
+
+/**
+ * The mode the app opens in. Before visitors could use the app it was only for staff, so a phone
+ * that already has records or has synced is a staff phone. It stays the way it was instead of
+ * asking who's using it.
+ */
+async function startingMode(store: RecordsStore, saved: PlantRecord[]) {
+  const mode = await store.loadMode();
+  if (mode !== null || (saved.length === 0 && (await store.loadLastSynced()) === null)) {
+    return mode;
+  }
+  // The same check gives the same answer next time, so the app can still open if this fails.
+  await store.saveMode('staff').catch((error: unknown) => {
+    console.warn("Couldn't save that this phone is used by staff.", error);
+  });
+  return 'staff';
 }
 
 const RecordsContext = createContext<RecordsContextValue | null>(null);
@@ -147,18 +175,22 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     let active = true;
     const opening = openRecordsStore();
     opening
-      .then(async (store) => ({
-        store,
-        saved: await store.loadRecords(),
-        photos: await store.loadPhotos(),
-        species: await store.loadSpecies(),
-      }))
+      .then(async (store) => {
+        const saved = await store.loadRecords();
+        return {
+          store,
+          saved,
+          photos: await store.loadPhotos(),
+          species: await store.loadSpecies(),
+          mode: await startingMode(store, saved),
+        };
+      })
       .then(
-        ({ store, saved, photos, species }) => {
+        ({ store, saved, photos, species, mode }) => {
           // Before the form can show, so this can't take a photo that's on the form.
           removeStrayPhotos(photos.map((photo) => photo.path));
           if (active) {
-            setState({ status: 'ready', store, saved, photos, species });
+            setState({ status: 'ready', store, saved, photos, species, mode });
           }
         },
         (error: unknown) => {
@@ -434,6 +466,11 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     setState((current) => (current.status === 'ready' ? { ...current, species: list } : current));
   }
 
+  async function setMode(mode: AppMode) {
+    await store.saveMode(mode);
+    setState((current) => (current.status === 'ready' ? { ...current, mode } : current));
+  }
+
   return (
     <RecordsContext
       value={{
@@ -461,6 +498,8 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
         saveLastSynced,
         species,
         replaceSpecies,
+        mode: state.mode,
+        setMode,
       }}>
       {children}
     </RecordsContext>
