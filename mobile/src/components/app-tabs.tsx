@@ -9,8 +9,9 @@ import { useRecords } from '@/state/records-context';
 export default function AppTabs() {
   const theme = useTheme();
   const { pendingCount, mode } = useRecords();
-  // Visitors only read about plants, so the tabs for making and sending records are hidden.
-  // A phone that hasn't picked yet never gets here, because the welcome page shows instead.
+  // Visitors only read about plants, so the tabs for making and sending records are hidden, and
+  // only visitors get History. A phone that hasn't picked yet never gets here, because the
+  // welcome page shows instead.
   const visitor = mode === 'visitor';
   // Only Android gets a solid bar colour. Leaving it unset on iOS keeps the system glass bar.
   const backgroundColor = Platform.OS === 'android' ? theme.backgroundElement : undefined;
@@ -56,6 +57,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Badge hidden={pendingCount === 0}>
           {String(pendingCount)}
         </NativeTabs.Trigger.Badge>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="history" hidden={!visitor}>
+        <NativeTabs.Trigger.Label>History</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="clock.arrow.circlepath" md="history" />
       </NativeTabs.Trigger>
 
       {/* Visitors have no account, so the same tab holds their settings instead. */}

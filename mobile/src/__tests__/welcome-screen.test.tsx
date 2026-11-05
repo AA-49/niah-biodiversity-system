@@ -17,7 +17,7 @@ jest.mock('expo-network', () => ({
   addNetworkStateListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
-const VISITOR_TABS = ['Home', 'Scan', 'Settings'];
+const VISITOR_TABS = ['Home', 'Scan', 'History', 'Settings'];
 const STAFF_TABS = ['Home', 'Scan', 'New Record', 'My Records', 'Profile'];
 
 // A record with no location, so the phone has something saved from before visitors could pick.
@@ -35,8 +35,8 @@ function StandIn({ name }: { name: string }) {
   return <Text>{name}</Text>;
 }
 
-// The real root layout, welcome page, tab bar, Home and Profile. The other pages need the camera
-// or GPS, so simple stand-ins take their place.
+// The real root layout, welcome page, tab bar, Home and Profile. The other pages have their own
+// tests, and some need the camera or GPS, so simple stand-ins take their place.
 function renderApp() {
   renderRouter(
     {
@@ -47,8 +47,10 @@ function renderApp() {
       '(tabs)/scan': () => <StandIn name="Scan page" />,
       '(tabs)/new-record': () => <StandIn name="New record page" />,
       '(tabs)/records': () => <StandIn name="Records page" />,
+      '(tabs)/history': () => <StandIn name="History page" />,
       '(tabs)/profile': ProfileScreen,
       'record/[id]': () => <StandIn name="Record page" />,
+      'plant/[tag]': () => <StandIn name="Plant page" />,
     },
     { initialUrl: '/' },
   );

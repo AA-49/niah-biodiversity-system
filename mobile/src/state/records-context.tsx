@@ -16,7 +16,7 @@ import { deletePhotoFile, removeStrayPhotos } from '@/lib/photo-files';
 import type { UploadOutcome } from '@/sync/upload-row';
 import type { AppMode } from '@/types/app-mode';
 import type { NewPlantRecord, PhotoOutcome, PlantRecord, RecordPhoto } from '@/types/plant-record';
-import type { PublicCopy, PublicRecord, PublicSpecies } from '@/types/public-copy';
+import type { PublicCopy, PublicRecord, PublicSpecies, ScanEntry } from '@/types/public-copy';
 
 // Records are saved in SQLite on the phone (src/db), so they're still there after the app
 // restarts or the phone runs out of battery. The species list downloaded when the phone syncs is
@@ -24,7 +24,7 @@ import type { PublicCopy, PublicRecord, PublicSpecies } from '@/types/public-cop
 // Whether the phone is used by a visitor or by park staff is saved there as well, and it picks
 // the tabs. So is a copy of the plant info on the public website, which lets a visitor scan a tag
 // with no signal. src/state/public-copy-context.tsx downloads it, and it's kept apart from the
-// records staff make.
+// records staff make. The tags a visitor scans are saved there too, for the History tab.
 
 type RecordsContextValue = {
   /** Newest first. */
@@ -110,6 +110,14 @@ type RecordsContextValue = {
     records: PublicRecord[],
     downloadedAt: string,
   ) => Promise<void>;
+  /** Finds a tag in the saved plant info, the same ways findByTag does. */
+  findPublicByTag: (input: string) => PublicRecord | undefined;
+  /** The tags a visitor scanned on this phone, newest first, each one once. */
+  scans: ScanEntry[];
+  /** Puts a tag at the top of History. If saving fails it throws and History stays as it was. */
+  saveScan: (tagCode: string) => Promise<void>;
+  /** Empties History. If that fails it throws and History stays as it was. */
+  clearScans: () => Promise<void>;
 };
 
 type StoreState =
@@ -123,6 +131,7 @@ type StoreState =
       photos: RecordPhoto[];
       species: SpeciesOption[];
       publicCopy: PublicCopy;
+      scans: ScanEntry[];
       mode: AppMode | null;
     };
 
@@ -202,16 +211,17 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
           photos: await store.loadPhotos(),
           species: await store.loadSpecies(),
           publicCopy: await store.loadPublicCopy(),
+          scans: await store.loadScans(),
           // Last, because it's the only one that can write.
           mode: await startingMode(store, saved),
         };
       })
       .then(
-        ({ store, saved, photos, species, publicCopy, mode }) => {
+        ({ store, saved, photos, species, publicCopy, scans, mode }) => {
           // Before the form can show, so this can't take a photo that's on the form.
           removeStrayPhotos(photos.map((photo) => photo.path));
           if (active) {
-            setState({ status: 'ready', store, saved, photos, species, publicCopy, mode });
+            setState({ status: 'ready', store, saved, photos, species, publicCopy, scans, mode });
           }
         },
         (error: unknown) => {
@@ -295,6 +305,7 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
   // The sample records only show in development builds. They're never saved, so the upload (which
   // only reads the database) can't send them anywhere.
   const records = [...state.saved, ...SAMPLE_RECORDS].sort(newestFirst);
+  const publicRecords = state.publicCopy.records;
 
   const pendingCount = records.filter((record) => record.syncStatus === 'pending').length;
   // Counted on its own instead of total minus pending, so records that fail to upload don't show
@@ -361,6 +372,10 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
 
   function findByTag(input: string) {
     return records.find((record) => matchesTag(record, input));
+  }
+
+  function findPublicByTag(input: string) {
+    return publicRecords.find((record) => matchesTag(record, input));
   }
 
   function loadWaiting() {
@@ -502,6 +517,28 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     setState((current) => (current.status === 'ready' ? { ...current, publicCopy } : current));
   }
 
+  async function saveScan(tagCode: string) {
+    const scannedAt = new Date().toISOString();
+    await store.saveScan(tagCode, scannedAt);
+    // The store keeps one row per tag, so a tag scanned again moves to the top here too.
+    setState((current) =>
+      current.status === 'ready'
+        ? {
+            ...current,
+            scans: [
+              { tagCode, scannedAt },
+              ...current.scans.filter((scan) => scan.tagCode !== tagCode),
+            ],
+          }
+        : current,
+    );
+  }
+
+  async function clearScans() {
+    await store.clearScans();
+    setState((current) => (current.status === 'ready' ? { ...current, scans: [] } : current));
+  }
+
   return (
     <RecordsContext
       value={{
@@ -532,9 +569,13 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
         mode: state.mode,
         setMode,
         publicSpecies: state.publicCopy.species,
-        publicRecords: state.publicCopy.records,
+        publicRecords,
         publicCopyAt: state.publicCopy.downloadedAt,
         replacePublicCopy,
+        findPublicByTag,
+        scans: state.scans,
+        saveScan,
+        clearScans,
       }}>
       {children}
     </RecordsContext>

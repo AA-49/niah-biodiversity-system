@@ -21,7 +21,8 @@ import { useRecords } from '@/state/records-context';
 // looks close to the Android one. Keep the tabs in the same order as app-tabs.tsx.
 export default function AppTabs() {
   const { pendingCount, mode } = useRecords();
-  // Visitors only read about plants, so the tabs for making and sending records are left out.
+  // Visitors only read about plants, so the tabs for making and sending records are left out,
+  // and only visitors get History.
   const visitor = mode === 'visitor';
 
   return (
@@ -45,6 +46,11 @@ export default function AppTabs() {
               <TabButton icon="records" label="My Records" badge={pendingCount} />
             </TabTrigger>
           )}
+          {visitor ? (
+            <TabTrigger name="history" href="/history" asChild>
+              <TabButton icon="history" label="History" />
+            </TabTrigger>
+          ) : null}
           {/* Visitors have no account, so the same tab holds their settings instead. */}
           <TabTrigger name="profile" href="/profile" asChild>
             <TabButton

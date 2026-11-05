@@ -36,6 +36,11 @@ export const Icons = {
   settings: symbol('gear', 'settings'),
   visitor: symbol('figure.walk', 'hiking'),
   staff: symbol('person.text.rectangle', 'badge'),
+  history: symbol('clock.arrow.circlepath', 'history'),
+  trash: symbol('trash', 'delete'),
+  habitat: symbol('tree', 'forest'),
+  people: symbol('person.2', 'group'),
+  shield: symbol('shield.lefthalf.filled', 'shield'),
 };
 
 export type IconName = keyof typeof Icons;
