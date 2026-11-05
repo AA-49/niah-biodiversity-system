@@ -3,15 +3,22 @@ import * as Network from 'expo-network';
 import type { ReactNode } from 'react';
 import { AccessibilityInfo, AppState } from 'react-native';
 
+import {
+  deleteSpeciesPhoto,
+  downloadSpeciesPhoto,
+  removeStraySpeciesPhotos,
+} from '@/lib/species-photo-files';
 import { getSupabase } from '@/lib/supabase';
 import { PublicCopyProvider, usePublicCopy } from '@/state/public-copy-context';
 import { useRecords } from '@/state/records-context';
 import { downloadPublicCopy, type DownloadOutcome } from '@/sync/public-copy';
+import { downloadMissingPhotos } from '@/sync/public-photos';
 import { supabasePublicCopyApi } from '@/sync/supabase-public-api';
 import type { AppMode } from '@/types/app-mode';
 
-// This file is about when the plant info downloads and what the app says about it. What a
-// download does is in src/sync/__tests__/public-copy.test.ts.
+// This file is about when the plant info and the species photos download, and what the app says
+// about it. What a download does is in src/sync/__tests__/public-copy.test.ts, and what a round of
+// photo downloads does is in src/sync/__tests__/public-photos.test.ts.
 
 jest.mock('expo-network', () => ({ addNetworkStateListener: jest.fn() }));
 jest.mock('@/lib/supabase', () => ({ getSupabase: jest.fn() }));
@@ -21,6 +28,7 @@ jest.mock('@/sync/public-copy', () => ({
   ...jest.requireActual('@/sync/public-copy'),
   downloadPublicCopy: jest.fn(),
 }));
+jest.mock('@/sync/public-photos', () => ({ downloadMissingPhotos: jest.fn() }));
 
 const MINUTE = 60 * 1000;
 const DOWNLOADED = '2026-11-04T06:15:00.000Z';
@@ -28,19 +36,27 @@ const MODES: AppMode[] = ['visitor', 'staff'];
 const NOT_DONE: DownloadOutcome[] = ['offline', 'failed'];
 
 // Stand-ins for the Supabase client and the server made from it, so the tests can check the
-// download gets the right ones.
+// downloads get the right ones.
 const SUPABASE = {};
-const SERVER = {};
+const SERVER = { online: jest.fn() };
 
 let appStateListener: (state: string) => void;
 let networkListener: (state: { isConnected?: boolean }) => void;
 const stopAppState = jest.fn();
 const stopNetwork = jest.fn();
 const replacePublicCopy = jest.fn(async () => {});
+const loadPublicPhotos = jest.fn();
+const savePublicPhotoFile = jest.fn();
 
 /** Who uses the phone, and when the plant info saved on it came down (null if it hasn't yet). */
 function setRecords(mode: AppMode | null, publicCopyAt: string | null = null) {
-  jest.mocked(useRecords).mockReturnValue({ mode, publicCopyAt, replacePublicCopy } as never);
+  jest.mocked(useRecords).mockReturnValue({
+    mode,
+    publicCopyAt,
+    replacePublicCopy,
+    loadPublicPhotos,
+    savePublicPhotoFile,
+  } as never);
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -74,14 +90,29 @@ function holdNextDownload() {
   return (outcome: DownloadOutcome) => finish(outcome);
 }
 
+const photoRounds = () => jest.mocked(downloadMissingPhotos).mock.calls.length;
+
+/** Keeps the next round of photo downloads going until the test lets it finish. */
+function holdNextPhotos() {
+  let finish = () => {};
+  jest.mocked(downloadMissingPhotos).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = () => resolve();
+      }),
+  );
+  return () => finish();
+}
+
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.mocked(getSupabase).mockReturnValue(SUPABASE as never);
   jest.mocked(supabasePublicCopyApi).mockReturnValue(SERVER as never);
-  // A reset and not just a clear, so a held download one test didn't use can't leak into the next.
+  // Resets and not just clears, so a held download one test didn't use can't leak into the next.
   jest.mocked(downloadPublicCopy).mockReset().mockResolvedValue('done');
+  jest.mocked(downloadMissingPhotos).mockReset().mockResolvedValue(undefined);
   setRecords('visitor');
   jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
     appStateListener = listener as typeof appStateListener;
@@ -249,6 +280,74 @@ describe('one download at a time', () => {
     await act(async () => finish('done'));
     await settle(MINUTE);
     expect(downloads()).toBe(1);
+  });
+});
+
+describe('the species photos', () => {
+  it.each(MODES)('gets the missing ones in %s mode once the plant info updates', async (mode) => {
+    setRecords(mode);
+    await renderCopy();
+    expect(photoRounds()).toBe(1);
+    // The real file and database functions, and the signal check of the same server.
+    expect(jest.mocked(downloadMissingPhotos).mock.calls[0][0]).toEqual({
+      online: SERVER.online,
+      loadPhotos: loadPublicPhotos,
+      download: downloadSpeciesPhoto,
+      saveFile: savePublicPhotoFile,
+      deleteFile: deleteSpeciesPhoto,
+      removeStray: removeStraySpeciesPhotos,
+    });
+  });
+
+  it.each(NOT_DONE)("doesn't get any when the plant info download ends %s", async (outcome) => {
+    jest.mocked(downloadPublicCopy).mockResolvedValue(outcome);
+    const { result } = await renderCopy();
+    await act(() => result.current.updateNow());
+    expect(downloads()).toBe(2);
+    expect(photoRounds()).toBe(0);
+  });
+
+  it("doesn't hold up the plant info while the photos come down", async () => {
+    holdNextPhotos();
+    const { result } = await renderCopy();
+    expect(photoRounds()).toBe(1);
+    expect(result.current.running).toBe(false);
+    expect(result.current.lastOutcome).toBe('done');
+
+    await act(() => result.current.updateNow());
+    expect(downloads()).toBe(2);
+    expect(result.current.message).toBe('Plant info updated.');
+  });
+
+  it('waits for the round going, then goes once more for the updates during it', async () => {
+    const finish = holdNextPhotos();
+    const { result } = await renderCopy();
+    await act(() => result.current.updateNow());
+    await act(() => result.current.updateNow());
+    expect(downloads()).toBe(3);
+    expect(photoRounds()).toBe(1);
+
+    await act(async () => finish());
+    await settle();
+    expect(photoRounds()).toBe(2);
+    await settle(MINUTE);
+    expect(photoRounds()).toBe(2);
+
+    // With no round going, the next update starts one straight away.
+    await act(() => result.current.updateNow());
+    expect(photoRounds()).toBe(3);
+  });
+
+  // Reading the saved photos or checking for signal can fail.
+  it('warns when a round throws, and still goes again after the next update', async () => {
+    const error = new Error('Something went wrong.');
+    jest.mocked(downloadMissingPhotos).mockRejectedValueOnce(error);
+    const { result } = await renderCopy();
+    expect(console.warn).toHaveBeenCalledWith("Couldn't download the species photos.", error);
+
+    await act(() => result.current.updateNow());
+    expect(photoRounds()).toBe(2);
+    expect(console.warn).toHaveBeenCalledTimes(1);
   });
 });
 

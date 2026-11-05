@@ -4,7 +4,7 @@ import type { SpeciesOption } from '@/data/species-list';
 import { DATABASE_NAME } from '@/db/database';
 import { EMPTY_PUBLIC_COPY, openRecordsStore, type RecordsStore } from '@/db/records-store';
 import type { PlantCondition, PlantRecord } from '@/types/plant-record';
-import type { IucnCode, PublicRecord, PublicSpecies } from '@/types/public-copy';
+import type { IucnCode, NewPublicPhoto, PublicRecord, PublicSpecies } from '@/types/public-copy';
 
 // The copy of the public plant info that visitors scan tags with, and the tags this phone scanned.
 // The text is made up for these tests, and like the real copy nothing here has a location.
@@ -55,6 +55,23 @@ const unmatched: PublicRecord = {
   speciesName: 'Ficus sp.',
   recordedAt: '2026-10-19T16:00:00.000Z',
 };
+
+// A made-up main photo for each species.
+const pitcherPhoto: NewPublicPhoto = {
+  speciesSlug: 'nepenthes-rafflesiana',
+  url: 'https://images.example/pitcher.jpg',
+  caption: 'A pitcher on its vine.',
+  credit: 'Park staff',
+};
+const figPhoto: NewPublicPhoto = {
+  speciesSlug: 'ficus-benjamina',
+  url: 'https://images.example/fig.jpg',
+  caption: '',
+  credit: '',
+};
+// The names of their copies on the phone once they've come down.
+const PITCHER_FILE = 'pitcher-copy';
+const FIG_FILE = 'fig-copy';
 
 const DOWNLOADED = '2026-11-04T06:15:00.000Z';
 const LATER = '2026-11-04T06:25:00.000Z';
@@ -221,6 +238,146 @@ describe('public plant info', () => {
       records: [unmatched, tagged],
       downloadedAt: DOWNLOADED,
     });
+  });
+});
+
+describe('species photos', () => {
+  /** Notes the copy of a photo, the way the app does once the photo has come down. */
+  function noteCopy(photo: NewPublicPhoto, file: string) {
+    return store.savePublicPhotoFile(photo.speciesSlug, photo.url, file);
+  }
+
+  it('has no photos until the first download', async () => {
+    expect(await store.loadPublicPhotos()).toEqual([]);
+  });
+
+  it('saves the photos in the order they came down, with no copy on the phone yet', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    expect(await store.loadPublicPhotos()).toEqual([pitcherPhoto, figPhoto]);
+  });
+
+  it('notes the copy of a photo once it has come down, and only once', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    expect(await noteCopy(pitcherPhoto, PITCHER_FILE)).toBe(true);
+    expect(await noteCopy(pitcherPhoto, 'second-copy')).toBe(false);
+    expect(await store.loadPublicPhotos()).toEqual([
+      { ...pitcherPhoto, file: PITCHER_FILE },
+      figPhoto,
+    ]);
+  });
+
+  it("won't note a copy made from a photo that has changed since", async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    // New plant info came down while the old photo was still downloading.
+    const newPhoto = { ...pitcherPhoto, url: 'https://images.example/pitcher-2.jpg' };
+    await store.replacePublicCopy([fig, pitcher], [], LATER, [newPhoto, figPhoto]);
+
+    expect(await noteCopy(pitcherPhoto, PITCHER_FILE)).toBe(false);
+    expect(await store.loadPublicPhotos()).toEqual([newPhoto, figPhoto]);
+  });
+
+  it("won't note a copy for a species that has no photo with that link", async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    expect(await noteCopy({ ...pitcherPhoto, speciesSlug: fig.slug }, FIG_FILE)).toBe(false);
+    expect(await store.loadPublicPhotos()).toEqual([pitcherPhoto, figPhoto]);
+  });
+
+  it('keeps the copy of a photo whose link is the same, and drops a changed one', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    await noteCopy(pitcherPhoto, PITCHER_FILE);
+    await noteCopy(figPhoto, FIG_FILE);
+
+    const recaptioned = { ...pitcherPhoto, caption: 'A pitcher up close.', credit: 'Park guide' };
+    const newFigPhoto = { ...figPhoto, url: 'https://images.example/fig-2.jpg' };
+    await store.replacePublicCopy([fig, pitcher], [], LATER, [recaptioned, newFigPhoto]);
+    expect(await store.loadPublicPhotos()).toEqual([
+      { ...recaptioned, file: PITCHER_FILE },
+      newFigPhoto,
+    ]);
+
+    // The new link has no copy yet, so the app can download it and note its copy.
+    expect(await noteCopy(newFigPhoto, 'fig-copy-2')).toBe(true);
+  });
+
+  // With no new photo list, like when the photos couldn't be downloaded.
+  it.each<[string, null | undefined]>([
+    ['left out', undefined],
+    ['null', null],
+  ])('keeps the photos of species still there when the photos are %s', async (_what, photos) => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    await noteCopy(pitcherPhoto, PITCHER_FILE);
+
+    // The photos stay in the order they came down in. Sorting by name would put the fig first.
+    await store.replacePublicCopy([fig, pitcher], [tagged], LATER, photos);
+    expect(await store.loadPublicPhotos()).toEqual([
+      { ...pitcherPhoto, file: PITCHER_FILE },
+      figPhoto,
+    ]);
+
+    await store.replacePublicCopy([pitcher], [tagged], LATER, photos);
+    expect(await store.loadPublicPhotos()).toEqual([{ ...pitcherPhoto, file: PITCHER_FILE }]);
+  });
+
+  it('drops every photo when the server has none', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    await noteCopy(pitcherPhoto, PITCHER_FILE);
+    await store.replacePublicCopy([fig, pitcher], [], LATER, []);
+    expect(await store.loadPublicPhotos()).toEqual([]);
+  });
+
+  it('saves only the first photo of each species, and only ones with a link', async () => {
+    const secondPhoto = { ...pitcherPhoto, url: 'https://images.example/pitcher-2.jpg' };
+    const noLink = { ...figPhoto, url: '' };
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [
+      pitcherPhoto,
+      secondPhoto,
+      noLink,
+    ]);
+    expect(await store.loadPublicPhotos()).toEqual([pitcherPhoto]);
+  });
+
+  it('leaves out the photo of a species that is not in the plant info', async () => {
+    await store.replacePublicCopy([pitcher], [], DOWNLOADED, [figPhoto, pitcherPhoto]);
+    expect(await store.loadPublicPhotos()).toEqual([pitcherPhoto]);
+  });
+
+  it('keeps the photos as they were when the new plant info is turned down', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    await noteCopy(pitcherPhoto, PITCHER_FILE);
+    const saved = [{ ...pitcherPhoto, file: PITCHER_FILE }, figPhoto];
+
+    await expect(store.replacePublicCopy([], [], LATER, [])).rejects.toThrow(EMPTY_PUBLIC_COPY);
+    expect(await store.loadPublicPhotos()).toEqual(saved);
+
+    const badFig = { ...fig, iucnCode: 'XX' as IucnCode };
+    await expect(store.replacePublicCopy([pitcher, badFig], [], LATER, [])).rejects.toThrow(
+      'CHECK constraint failed',
+    );
+    expect(await store.loadPublicPhotos()).toEqual(saved);
+
+    const noTag = { ...tagged, tagCode: '' };
+    await expect(store.replacePublicCopy([pitcher, fig], [noTag], LATER, [])).rejects.toThrow(
+      'CHECK constraint failed',
+    );
+    expect(await store.loadPublicPhotos()).toEqual(saved);
+  });
+
+  it("won't note a copy with no file name", async () => {
+    await store.replacePublicCopy([pitcher], [], DOWNLOADED, [pitcherPhoto]);
+    await expect(noteCopy(pitcherPhoto, '')).rejects.toThrow('CHECK constraint failed');
+    expect(await store.loadPublicPhotos()).toEqual([pitcherPhoto]);
+  });
+
+  it('still has the photos and their copies after it is closed and opened again', async () => {
+    await store.replacePublicCopy([fig, pitcher], [], DOWNLOADED, [pitcherPhoto, figPhoto]);
+    await noteCopy(pitcherPhoto, PITCHER_FILE);
+    await store.close();
+
+    store = await openRecordsStore();
+    expect(await store.loadPublicPhotos()).toEqual([
+      { ...pitcherPhoto, file: PITCHER_FILE },
+      figPhoto,
+    ]);
   });
 });
 

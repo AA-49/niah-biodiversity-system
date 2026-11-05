@@ -17,7 +17,7 @@ jest.mock('expo-network', () => ({
   addNetworkStateListener: jest.fn(() => ({ remove: jest.fn() })),
 }));
 
-const VISITOR_TABS = ['Home', 'Scan', 'History', 'Settings'];
+const VISITOR_TABS = ['Home', 'Scan', 'Plants', 'History', 'Settings'];
 const STAFF_TABS = ['Home', 'Scan', 'New Record', 'My Records', 'Profile'];
 
 // A record with no location, so the phone has something saved from before visitors could pick.
@@ -47,10 +47,12 @@ function renderApp() {
       '(tabs)/scan': () => <StandIn name="Scan page" />,
       '(tabs)/new-record': () => <StandIn name="New record page" />,
       '(tabs)/records': () => <StandIn name="Records page" />,
+      '(tabs)/plants': () => <StandIn name="Plants page" />,
       '(tabs)/history': () => <StandIn name="History page" />,
       '(tabs)/profile': ProfileScreen,
       'record/[id]': () => <StandIn name="Record page" />,
       'plant/[tag]': () => <StandIn name="Plant page" />,
+      'species/[slug]': () => <StandIn name="Species page" />,
     },
     { initialUrl: '/' },
   );

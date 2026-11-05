@@ -53,3 +53,8 @@ export const IUCN_SWATCH: Record<IucnCode, Swatch> = {
   DD: { background: '#D1D1C6', text: '#16201A' },
   NE: { background: '#FFFFFF', text: '#16201A', outlined: true },
 };
+
+/** Vulnerable, Endangered or Critically Endangered, like the website's Threatened filter. */
+export function isThreatened(code: IucnCode) {
+  return code === 'VU' || code === 'EN' || code === 'CR';
+}

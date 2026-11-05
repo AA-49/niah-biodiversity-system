@@ -7,7 +7,7 @@ jest.mock('expo-network', () => ({ getNetworkStateAsync: jest.fn() }));
 
 // A fake Supabase client that writes down everything the phone asks for. Its answers have the same
 // shape as what supabase-js gives back. The rows only have IDs, since these tests are about what
-// gets asked and not about the plant info itself.
+// gets asked and not about the plant info itself, and the links to stored photos are made up.
 
 type Answer = {
   data: { id: string }[] | null;
@@ -95,6 +95,15 @@ function fakeServer(answer: (table: string, from: number) => Answer) {
       };
       return query;
     },
+    storage: {
+      from(bucket: string) {
+        return {
+          getPublicUrl(path: string) {
+            return { data: { publicUrl: `https://storage.example/${bucket}/${path}` } };
+          },
+        };
+      },
+    },
   };
   return { api: supabasePublicCopyApi(supabase as unknown as SupabaseClient), asked };
 }
@@ -168,14 +177,49 @@ describe('fetchRecords', () => {
   });
 });
 
-describe.each(['fetchSpecies', 'fetchRecords'] as const)('%s', (fetch) => {
+describe('fetchPhotos', () => {
+  it('asks for the photo list of every species, a page at a time, sorted by ID', async () => {
+    const { api, asked } = fakeServer(onePage('nepenthes-rafflesiana'));
+    expect(await api.fetchPhotos()).toEqual([{ id: 'nepenthes-rafflesiana' }]);
+    expect(asked).toEqual([
+      {
+        table: 'species_photos_public',
+        fields: ['id', 'photos'],
+        filters: [],
+        orderBy: ['id'],
+        range: [0, 499],
+      },
+      {
+        table: 'species_photos_public',
+        fields: ['id', 'photos'],
+        filters: [],
+        orderBy: ['id'],
+        range: [1, 500],
+      },
+    ]);
+  });
+});
+
+describe('photoUrl', () => {
+  // The photos taken of each record are kept somewhere else that needs a sign in, so the phone
+  // only builds links into the website's public storage for species photos.
+  it('builds the link to a photo in the public storage for species photos', () => {
+    const { api, asked } = fakeServer(onePage());
+    const path = 'species/nepenthes-rafflesiana/5d0c8e2a-7b1f-4c3d-9e6a-2f4b8c1d3e5a.jpg';
+    expect(api.photoUrl(path)).toBe(`https://storage.example/botanical-photos/${path}`);
+    expect(asked).toEqual([]);
+  });
+});
+
+describe.each([
+  ['fetchSpecies', "Couldn't download the plant info."],
+  ['fetchRecords', "Couldn't download the plant info."],
+  ['fetchPhotos', "Couldn't download the species photos."],
+] as const)('%s', (fetch, warning) => {
   it('gives null and warns when the server answers with an error', async () => {
     const { api } = fakeServer(() => MISSING_COLUMN);
     expect(await api[fetch]()).toBeNull();
-    expect(console.warn).toHaveBeenCalledWith(
-      "Couldn't download the plant info.",
-      MISSING_COLUMN.error,
-    );
+    expect(console.warn).toHaveBeenCalledWith(warning, MISSING_COLUMN.error);
   });
 
   // No answer at all just means no signal, and that fixes itself.

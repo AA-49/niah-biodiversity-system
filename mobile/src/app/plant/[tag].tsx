@@ -2,6 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/screen';
+import { SpeciesPhoto } from '@/components/species-photo';
 import { SpeciesSections } from '@/components/species-sections';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/button';
@@ -18,12 +19,13 @@ const NO_SPECIES = "The field team hasn't matched this plant to a species on our
 
 /**
  * A tagged plant from the plant info saved on this phone, so it opens with no signal. It shows the
- * same things as the tag page on the website, apart from where the plant is and its photos.
+ * same things as the tag page on the website, apart from where the plant is and the photos the
+ * field team took of it.
  */
 export default function PlantScreen() {
   const router = useRouter();
   const { tag } = useLocalSearchParams<{ tag: string }>();
-  const { findPublicByTag, publicSpecies, publicCopyAt } = useRecords();
+  const { findPublicByTag, publicSpecies, publicCopyAt, publicPhotos } = useRecords();
   // Changes when the app comes back to the front, which redraws the "today" in Info from.
   const now = useNow();
   const record = findPublicByTag(tag);
@@ -55,6 +57,7 @@ export default function PlantScreen() {
   const latinName = species ? species.scientificName : record.speciesName;
   const otherNames = species ? species.commonNames.filter((common) => common !== name) : [];
   const summary = species ? species.summary.trim() : NO_SPECIES;
+  const photo = species && publicPhotos.find((item) => item.speciesSlug === species.slug);
   // Recent times start with "Today" or "Yesterday", which read better in lower case here.
   const when = publicCopyAt ? formatRecordedAt(publicCopyAt, now) : undefined;
   const infoFrom = when ? `Info from ${when.charAt(0).toLowerCase()}${when.slice(1)}` : undefined;
@@ -116,7 +119,27 @@ export default function PlantScreen() {
         <InfoRow label="Recorded" value={formatParkDate(record.recordedAt)} />
       </Card>
 
+      {photo?.file ? (
+        <Card title="Photo" icon="library">
+          <ThemedText type="small" themeColor="textSecondary">
+            This photo shows the species, not this plant.
+          </ThemedText>
+          <SpeciesPhoto photo={photo} name={name} />
+        </Card>
+      ) : null}
+
       {species ? <SpeciesSections species={species} /> : null}
+
+      {species ? (
+        <Button
+          label="More about this species"
+          icon="leaf"
+          variant="outline"
+          onPress={() =>
+            router.push({ pathname: '/species/[slug]', params: { slug: species.slug } })
+          }
+        />
+      ) : null}
 
       {infoFrom ? (
         <ThemedText type="small" themeColor="textSecondary">

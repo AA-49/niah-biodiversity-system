@@ -9,22 +9,32 @@ import { SAMPLE_RECORDS } from '@/data/mock-records';
 import { SPECIES_LIST, type SpeciesOption } from '@/data/species-list';
 import { DatabaseTooNewError } from '@/db/database';
 import { DatabaseLockedError } from '@/db/encryption';
+import { keptPhotos, photoFiles } from '@/db/kept-photos';
 import { openRecordsStore, type RecordReview, type RecordsStore } from '@/db/records-store';
 import { useTheme } from '@/hooks/use-theme';
 import { matchesTag, newId, tagCodeFor } from '@/lib/id';
 import { deletePhotoFile, removeStrayPhotos } from '@/lib/photo-files';
+import { removeStraySpeciesPhotos } from '@/lib/species-photo-files';
 import type { UploadOutcome } from '@/sync/upload-row';
 import type { AppMode } from '@/types/app-mode';
 import type { NewPlantRecord, PhotoOutcome, PlantRecord, RecordPhoto } from '@/types/plant-record';
-import type { PublicCopy, PublicRecord, PublicSpecies, ScanEntry } from '@/types/public-copy';
+import type {
+  NewPublicPhoto,
+  PublicCopy,
+  PublicPhoto,
+  PublicRecord,
+  PublicSpecies,
+  ScanEntry,
+} from '@/types/public-copy';
 
 // Records are saved in SQLite on the phone (src/db), so they're still there after the app
 // restarts or the phone runs out of battery. The species list downloaded when the phone syncs is
 // saved there too. src/state/sync-context.tsx uploads and downloads them, using the functions here.
 // Whether the phone is used by a visitor or by park staff is saved there as well, and it picks
 // the tabs. So is a copy of the plant info on the public website, which lets a visitor scan a tag
-// with no signal. src/state/public-copy-context.tsx downloads it, and it's kept apart from the
-// records staff make. The tags a visitor scans are saved there too, for the History tab.
+// with no signal. src/state/public-copy-context.tsx downloads it, along with the main photo of
+// each species, and it's kept apart from the records staff make. The tags a visitor scans are
+// saved there too, for the History tab.
 
 type RecordsContextValue = {
   /** Newest first. */
@@ -102,14 +112,29 @@ type RecordsContextValue = {
   /** When the plant info last came down (ISO 8601), or null if it never has. */
   publicCopyAt: string | null;
   /**
+   * The main photo of each species in the saved plant info. A photo with no file hasn't come down
+   * yet.
+   */
+  publicPhotos: PublicPhoto[];
+  /**
    * Saves downloaded plant info on the phone in place of the old copy. If that fails it throws and
-   * the old copy stays.
+   * the old copy stays. A photo whose link didn't change keeps the copy already on the phone, and
+   * with no photos, like when they couldn't be downloaded, the saved ones stay for the species
+   * still there.
    */
   replacePublicCopy: (
     species: PublicSpecies[],
     records: PublicRecord[],
     downloadedAt: string,
+    photos?: NewPublicPhoto[] | null,
   ) => Promise<void>;
+  /** The photos as they are in the database, for downloading the ones with no file yet. */
+  loadPublicPhotos: () => Promise<PublicPhoto[]>;
+  /**
+   * Notes the file a photo was saved in. Says false when the photo changed or went away while it
+   * was downloading, and then the file isn't needed.
+   */
+  savePublicPhotoFile: (speciesSlug: string, url: string, file: string) => Promise<boolean>;
   /** Finds a tag in the saved plant info, the same ways findByTag does. */
   findPublicByTag: (input: string) => PublicRecord | undefined;
   /** The tags a visitor scanned on this phone, newest first, each one once. */
@@ -131,6 +156,7 @@ type StoreState =
       photos: RecordPhoto[];
       species: SpeciesOption[];
       publicCopy: PublicCopy;
+      publicPhotos: PublicPhoto[];
       scans: ScanEntry[];
       mode: AppMode | null;
     };
@@ -211,17 +237,30 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
           photos: await store.loadPhotos(),
           species: await store.loadSpecies(),
           publicCopy: await store.loadPublicCopy(),
+          publicPhotos: await store.loadPublicPhotos(),
           scans: await store.loadScans(),
           // Last, because it's the only one that can write.
           mode: await startingMode(store, saved),
         };
       })
       .then(
-        ({ store, saved, photos, species, publicCopy, scans, mode }) => {
+        ({ store, saved, photos, species, publicCopy, publicPhotos, scans, mode }) => {
           // Before the form can show, so this can't take a photo that's on the form.
           removeStrayPhotos(photos.map((photo) => photo.path));
           if (active) {
-            setState({ status: 'ready', store, saved, photos, species, publicCopy, scans, mode });
+            // Before the plant info can update, so no species photo is downloading yet.
+            removeStraySpeciesPhotos(photoFiles(publicPhotos));
+            setState({
+              status: 'ready',
+              store,
+              saved,
+              photos,
+              species,
+              publicCopy,
+              publicPhotos,
+              scans,
+              mode,
+            });
           }
         },
         (error: unknown) => {
@@ -511,10 +550,45 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     newSpecies: PublicSpecies[],
     newRecords: PublicRecord[],
     downloadedAt: string,
+    newPhotos?: NewPublicPhoto[] | null,
   ) {
-    await store.replacePublicCopy(newSpecies, newRecords, downloadedAt);
+    await store.replacePublicCopy(newSpecies, newRecords, downloadedAt, newPhotos);
     const publicCopy = { species: newSpecies, records: newRecords, downloadedAt };
-    setState((current) => (current.status === 'ready' ? { ...current, publicCopy } : current));
+    const slugs = new Set(newSpecies.map((item) => item.slug));
+    // The same rule the store used, so a photo keeps its file here exactly when it did there.
+    setState((current) =>
+      current.status === 'ready'
+        ? {
+            ...current,
+            publicCopy,
+            publicPhotos: keptPhotos(newPhotos, current.publicPhotos, slugs),
+          }
+        : current,
+    );
+  }
+
+  function loadPublicPhotos() {
+    return store.loadPublicPhotos();
+  }
+
+  async function savePublicPhotoFile(speciesSlug: string, url: string, file: string) {
+    const noted = await store.savePublicPhotoFile(speciesSlug, url, file);
+    if (noted) {
+      // The same photo the store changed: the one with this link that had no file yet.
+      setState((current) =>
+        current.status === 'ready'
+          ? {
+              ...current,
+              publicPhotos: current.publicPhotos.map((photo) =>
+                photo.speciesSlug === speciesSlug && photo.url === url && !photo.file
+                  ? { ...photo, file }
+                  : photo,
+              ),
+            }
+          : current,
+      );
+    }
+    return noted;
   }
 
   async function saveScan(tagCode: string) {
@@ -571,7 +645,10 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
         publicSpecies: state.publicCopy.species,
         publicRecords,
         publicCopyAt: state.publicCopy.downloadedAt,
+        publicPhotos: state.publicPhotos,
         replacePublicCopy,
+        loadPublicPhotos,
+        savePublicPhotoFile,
         findPublicByTag,
         scans: state.scans,
         saveScan,

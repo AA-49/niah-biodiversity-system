@@ -166,6 +166,19 @@ export const MIGRATIONS: readonly string[] = [
     tag_code TEXT PRIMARY KEY NOT NULL CHECK (tag_code <> ''),
     scanned_at TEXT NOT NULL
   ) STRICT;`,
+
+  // Version 8: the main photo of each species in the saved plant info, so a visitor can see it
+  // with no signal. url is where the photo is on the server, so a photo that changes there comes
+  // down again. file is the name of the copy in the species-photos folder, and stays empty until
+  // the photo has come down. No foreign key, for the same reason as record_photos, so the store
+  // swaps this table in the same transaction as the species.
+  `CREATE TABLE public_photos (
+    species_slug TEXT PRIMARY KEY NOT NULL CHECK (species_slug <> ''),
+    url TEXT NOT NULL CHECK (url <> ''),
+    caption TEXT NOT NULL DEFAULT '',
+    credit TEXT NOT NULL DEFAULT '',
+    file TEXT CHECK (file IS NULL OR file <> '')
+  ) STRICT;`,
 ];
 
 /**

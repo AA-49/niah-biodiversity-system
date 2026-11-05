@@ -14,7 +14,9 @@ import type {
 } from '@/types/plant-record';
 import type {
   IucnCode,
+  NewPublicPhoto,
   PublicCopy,
+  PublicPhoto,
   PublicRecord,
   PublicSpecies,
   ScanEntry,
@@ -22,6 +24,7 @@ import type {
 
 import { BUSY_TIMEOUT_MS, openDatabase } from './database';
 import { unlockConnection } from './encryption';
+import { keptPhotos } from './kept-photos';
 
 /** What an officer decided about one record, read back from the server. */
 export type RecordReview = {
@@ -101,12 +104,25 @@ export type RecordsStore = {
    * Swaps the saved public plant info for a new download in one go, together with when it came
    * down. If any species or record in it can't be saved, nothing changes and the old copy stays.
    * Turns down a download with no species.
+   *
+   * The photos are the main photo of each species. A photo whose link is the same as before keeps
+   * the copy already on the phone. With no photos, like when they couldn't be downloaded, the
+   * saved ones stay for the species still in the plant info.
    */
   replacePublicCopy: (
     species: PublicSpecies[],
     records: PublicRecord[],
     downloadedAt: string,
+    photos?: NewPublicPhoto[] | null,
   ) => Promise<void>;
+  /** The main photo of each species in the saved plant info, in the order they came down. */
+  loadPublicPhotos: () => Promise<PublicPhoto[]>;
+  /**
+   * Notes the name of the copy of a photo saved on the phone. Says false and changes nothing when
+   * the photo isn't saved with that link any more or already has a copy, like when new plant info
+   * came down while it was downloading.
+   */
+  savePublicPhotoFile: (speciesSlug: string, url: string, file: string) => Promise<boolean>;
   /** The tags scanned on this phone, the latest scan first. */
   loadScans: () => Promise<ScanEntry[]>;
   /** Saves a scan. A tag scanned again moves up to the top instead of being listed twice. */
@@ -249,6 +265,15 @@ type PublicRecordRow = {
   recorded_at: string;
 };
 
+/** One row of public_photos, with null for a photo that hasn't come down yet. */
+type PublicPhotoRow = {
+  species_slug: string;
+  url: string;
+  caption: string;
+  credit: string;
+  file: string | null;
+};
+
 /** One row of scan_history. */
 type ScanRow = {
   tag_code: string;
@@ -360,6 +385,16 @@ function toPublicRecord(row: PublicRecordRow): PublicRecord {
     heightM: row.height_m ?? undefined,
     condition: row.condition ?? undefined,
     recordedAt: row.recorded_at,
+  };
+}
+
+function toPublicPhoto(row: PublicPhotoRow): PublicPhoto {
+  return {
+    speciesSlug: row.species_slug,
+    url: row.url,
+    caption: row.caption,
+    credit: row.credit,
+    file: row.file ?? undefined,
   };
 }
 
@@ -568,7 +603,7 @@ export async function openRecordsStore(): Promise<RecordsStore> {
       };
     },
 
-    async replacePublicCopy(species, records, downloadedAt) {
+    async replacePublicCopy(species, records, downloadedAt, photos) {
       if (species.length === 0) {
         throw new Error(EMPTY_PUBLIC_COPY);
       }
@@ -578,6 +613,17 @@ export async function openRecordsStore(): Promise<RecordsStore> {
       await inOwnTransaction(db, async (txn) => {
         await txn.runAsync('DELETE FROM public_species');
         await txn.runAsync('DELETE FROM public_records');
+        // The saved photos are read after the first write, when no other connection can change
+        // them, so a photo copy noted just before this isn't lost.
+        const savedPhotos = await txn.getAllAsync<PublicPhotoRow>(
+          'SELECT * FROM public_photos ORDER BY rowid',
+        );
+        const kept = keptPhotos(
+          photos,
+          savedPhotos.map(toPublicPhoto),
+          new Set(species.map((item) => item.slug)),
+        );
+        await txn.runAsync('DELETE FROM public_photos');
         for (const item of species) {
           await txn.runAsync(
             `INSERT INTO public_species (slug, scientific_name, authority, family, common_names,
@@ -618,12 +664,43 @@ export async function openRecordsStore(): Promise<RecordsStore> {
             },
           );
         }
+        for (const photo of kept) {
+          await txn.runAsync(
+            `INSERT INTO public_photos (species_slug, url, caption, credit, file)
+            VALUES ($speciesSlug, $url, $caption, $credit, $file)`,
+            {
+              $speciesSlug: photo.speciesSlug,
+              $url: photo.url,
+              $caption: photo.caption,
+              $credit: photo.credit,
+              $file: photo.file ?? null,
+            },
+          );
+        }
         await txn.runAsync(
           `INSERT INTO sync_meta (key, value) VALUES ('public_copy_at', $value)
           ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
           { $value: downloadedAt },
         );
       });
+    },
+
+    async loadPublicPhotos() {
+      const rows = await db.getAllAsync<PublicPhotoRow>(
+        'SELECT * FROM public_photos ORDER BY rowid',
+      );
+      return rows.map(toPublicPhoto);
+    },
+
+    async savePublicPhotoFile(speciesSlug, url, file) {
+      // Only the photo the copy was made from, and only once, so a photo that changed on the
+      // server while it was downloading doesn't end up with the old picture.
+      const result = await db.runAsync(
+        `UPDATE public_photos SET file = $file
+        WHERE species_slug = $speciesSlug AND url = $url AND file IS NULL`,
+        { $file: file, $speciesSlug: speciesSlug, $url: url },
+      );
+      return result.changes > 0;
     },
 
     async loadScans() {

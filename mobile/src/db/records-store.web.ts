@@ -3,11 +3,13 @@ import type { AppMode } from '@/types/app-mode';
 import { PLANT_CONDITIONS, type PlantRecord, type RecordPhoto } from '@/types/plant-record';
 import {
   isIucnCode,
+  type PublicPhoto,
   type PublicRecord,
   type PublicSpecies,
   type ScanEntry,
 } from '@/types/public-copy';
 
+import { keptPhotos } from './kept-photos';
 import type { RecordsStore } from './records-store';
 
 /** A copy that doesn't share its list of common names, so a screen can't change the saved one. */
@@ -29,6 +31,7 @@ export async function openRecordsStore(): Promise<RecordsStore> {
   let publicSpecies: PublicSpecies[] = [];
   let publicRecords: PublicRecord[] = [];
   let publicCopyAt: string | null = null;
+  let publicPhotos: PublicPhoto[] = [];
   // In the order the tags were first scanned, like rowid in scan_history.
   const scans: ScanEntry[] = [];
 
@@ -161,7 +164,7 @@ export async function openRecordsStore(): Promise<RecordsStore> {
         downloadedAt: publicCopyAt,
       };
     },
-    async replacePublicCopy(newSpecies, newRecords, downloadedAt) {
+    async replacePublicCopy(newSpecies, newRecords, downloadedAt, newPhotos) {
       if (newSpecies.length === 0) {
         throw new Error('The plant info that came down had no species, so the old copy stays.');
       }
@@ -192,9 +195,26 @@ export async function openRecordsStore(): Promise<RecordsStore> {
             'condition.',
         );
       }
+      publicPhotos = keptPhotos(newPhotos, publicPhotos, slugs);
       publicSpecies = newSpecies.map(copySpecies);
       publicRecords = newRecords.map((record) => ({ ...record }));
       publicCopyAt = downloadedAt;
+    },
+    async loadPublicPhotos() {
+      return publicPhotos.map((photo) => ({ ...photo }));
+    },
+    async savePublicPhotoFile(speciesSlug, url, file) {
+      if (file === '') {
+        throw new Error('A saved photo needs a file name.');
+      }
+      const photo = publicPhotos.find(
+        (one) => one.speciesSlug === speciesSlug && one.url === url && one.file === undefined,
+      );
+      if (!photo) {
+        return false;
+      }
+      photo.file = file;
+      return true;
     },
     async loadScans() {
       // Latest first, and the tag first scanned later goes first when two have the same time, the

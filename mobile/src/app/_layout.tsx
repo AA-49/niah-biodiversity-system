@@ -14,8 +14,8 @@ export const unstable_settings = {
 
 /**
  * The pages that open above the tabs. Until someone picks who uses this phone, the welcome page
- * is the only one. Plant pages from the saved plant info open in both modes, and staff record
- * pages only open in staff mode.
+ * is the only one. Plant and species pages from the saved plant info open in both modes, and
+ * staff record pages only open in staff mode.
  */
 function RootStack({ tint }: { tint: string }) {
   const { mode } = useRecords();
@@ -34,6 +34,7 @@ function RootStack({ tint }: { tint: string }) {
       <Stack.Protected guard={mode !== null}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="plant/[tag]" options={{ title: 'Plant info' }} />
+        <Stack.Screen name="species/[slug]" options={{ title: 'Species' }} />
       </Stack.Protected>
       <Stack.Protected guard={mode === 'staff'}>
         <Stack.Screen name="record/[id]" options={{ title: 'Plant record' }} />

@@ -30,7 +30,7 @@ export function VisitorHome() {
 }
 
 /** How many plants can be looked up with no signal, or how getting them ready is going. */
-function OfflineCard() {
+export function OfflineCard() {
   const { publicRecords, publicCopyAt } = useRecords();
   const { updateNow, running, lastOutcome, canUpdate } = usePublicCopy();
   // Changes when the app comes back to the front, which redraws the "Today" on Last updated.

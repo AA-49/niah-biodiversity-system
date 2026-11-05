@@ -6,7 +6,7 @@ import PlantScreen from '@/app/plant/[tag]';
 import { formatRecordedAt, formatTime } from '@/lib/format';
 import { matchesTag } from '@/lib/id';
 import { useRecords } from '@/state/records-context';
-import type { PublicRecord, PublicSpecies } from '@/types/public-copy';
+import type { PublicPhoto, PublicRecord, PublicSpecies } from '@/types/public-copy';
 
 // The plant page, with the plant info saved on the phone swapped for made-up plants. Opening it
 // from a scan or from History is tested in scan-plant-info.test.tsx.
@@ -94,12 +94,24 @@ const STRANGLER_PLANT: PublicRecord = {
 
 const PLANTS = [PITCHER_PLANT, BENJAMINA_PLANT, FIG_PLANT, STRANGLER_PLANT];
 
-/** The plant info on the phone, and when it came down. */
-function setPlantInfo(publicCopyAt = DOWNLOADED) {
+// The pitcher plant species' main photo, saved on the phone under a made-up file name.
+const PITCHER_PHOTO: PublicPhoto = {
+  speciesSlug: 'nepenthes-rafflesiana',
+  url:
+    'https://storage.example/botanical-photos/species/nepenthes-rafflesiana/' +
+    '5d0c8e2a-7b1f-4c3d-9e6a-2f4b8c1d3e5a.jpg',
+  caption: 'A pitcher on its vine.',
+  credit: 'Niah field team',
+  file: '7f3a9c2e-4b1d-4e6f-8a2c-5d9e1b7f3a04',
+};
+
+/** The plant info on the phone, when it came down, and the species photos it has. */
+function setPlantInfo(publicCopyAt = DOWNLOADED, publicPhotos: PublicPhoto[] = []) {
   jest.mocked(useRecords).mockReturnValue({
     findPublicByTag: (input: string) => PLANTS.find((plant) => matchesTag(plant, input)),
     publicSpecies: [PITCHER, BENJAMINA],
     publicCopyAt,
+    publicPhotos,
   } as never);
 }
 
@@ -117,6 +129,7 @@ function renderApp(initialUrl: string) {
       _layout: TestLayout,
       scan: () => <StandIn name="Scan page" />,
       'plant/[tag]': PlantScreen,
+      'species/[slug]': () => <StandIn name="Species page" />,
     },
     { initialUrl },
   );
@@ -232,6 +245,50 @@ describe('plant page', () => {
     expect(name).not.toHaveStyle({ fontStyle: 'italic' });
     expect(screen.getByText('Ficus sp.')).toHaveStyle({ fontStyle: 'italic' });
     expect(screen.getByText(NO_SPECIES)).toBeVisible();
+  });
+});
+
+describe('species photo and page', () => {
+  it('shows the saved species photo with its caption and credit', async () => {
+    setPlantInfo(DOWNLOADED, [PITCHER_PHOTO]);
+    openPlant('NNP-E1A2B3');
+    expect(await screen.findByRole('heading', { name: 'Photo' })).toBeVisible();
+    expect(screen.getByText('This photo shows the species, not this plant.')).toBeVisible();
+    // The photo comes from the file on the phone, never the link, so it shows with no signal.
+    expect(screen.getByLabelText('A pitcher on its vine.')).toHaveProp('source', [
+      expect.objectContaining({
+        uri: 'file:///document/species-photos/7f3a9c2e-4b1d-4e6f-8a2c-5d9e1b7f3a04',
+      }),
+    ]);
+    expect(screen.getByText('A pitcher on its vine. Photo: Niah field team')).toBeVisible();
+  });
+
+  it("leaves the photo out until it's saved on the phone", async () => {
+    setPlantInfo(DOWNLOADED, [{ ...PITCHER_PHOTO, file: undefined }]);
+    openPlant('NNP-E1A2B3');
+    expect(await screen.findByRole('heading', { name: 'This plant' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Photo' })).toBeNull();
+    expect(screen.queryByLabelText('A pitcher on its vine.')).toBeNull();
+  });
+
+  it("doesn't show another species' photo", async () => {
+    setPlantInfo(DOWNLOADED, [PITCHER_PHOTO]);
+    openPlant('NNP-F4E5D6');
+    expect(await screen.findByRole('heading', { name: 'This plant' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Photo' })).toBeNull();
+  });
+
+  it('opens the species page from More about this species', async () => {
+    const app = openPlant('NNP-E1A2B3');
+    fireEvent.press(await screen.findByRole('button', { name: 'More about this species' }));
+    expect(app.getPathname()).toBe('/species/nepenthes-rafflesiana');
+    expect(await screen.findByText('Species page')).toBeVisible();
+  });
+
+  it('has no species page button for a plant with no species yet', async () => {
+    openPlant('NNP-9B8C7D');
+    expect(await screen.findByRole('heading', { name: 'Ficus sp.' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'More about this species' })).toBeNull();
   });
 });
 

@@ -1,18 +1,20 @@
 import {
   downloadMessage,
   downloadPublicCopy,
+  photosFromServer,
   recordsFromServer,
   speciesFromServer,
   type PublicCopyApi,
   type PublicCopyStore,
   type RecordsPublicRow,
+  type SpeciesPhotosRow,
   type SpeciesPublicRow,
 } from '@/sync/public-copy';
-import type { PublicRecord, PublicSpecies } from '@/types/public-copy';
+import type { NewPublicPhoto, PublicRecord, PublicSpecies } from '@/types/public-copy';
 
 // A fake server for the public plant info, and a fake phone to save it on. The rows look like what
-// the species_public and records_public views send back. The text is made up, and nothing here
-// has a location.
+// the species_public, records_public and species_photos_public views send back. The text and the
+// photo links are made up, and nothing here has a location.
 
 const DOWNLOADED = '2026-11-04T06:15:00.000Z';
 const now = () => DOWNLOADED;
@@ -75,21 +77,67 @@ const tagged: PublicRecord = {
   recordedAt: '2026-10-20T02:30:00.000Z',
 };
 
+// A photo uploaded to the website, the way the species_photos_public view lists it.
+const UPLOADED = 'species/nepenthes-rafflesiana/5d0c8e2a-7b1f-4c3d-9e6a-2f4b8c1d3e5a.jpg';
+
+function uploadedPhoto(changes: Record<string, unknown> = {}) {
+  return {
+    path: UPLOADED,
+    caption: 'A pitcher on its vine.',
+    credit: 'Niah field team',
+    isPrimary: true,
+    ...changes,
+  };
+}
+
+// A photo on another website.
+function linkedPhoto(changes: Record<string, unknown> = {}) {
+  return {
+    url: 'https://images.example/pitcher.jpg',
+    caption: 'Pitchers in the heath forest.',
+    credit: 'A made-up photographer',
+    ...changes,
+  };
+}
+
+function photosRow(changes: Partial<SpeciesPhotosRow> = {}): SpeciesPhotosRow {
+  return { id: 'nepenthes-rafflesiana', photos: [uploadedPhoto()], ...changes };
+}
+
+// Stands in for the server, which builds the link to an uploaded photo from where it's kept.
+const photoUrl = (path: string) => `https://storage.example/botanical-photos/${path}`;
+
+// What that row turns into on the phone.
+const pitcherPhoto: NewPublicPhoto = {
+  speciesSlug: 'nepenthes-rafflesiana',
+  url: photoUrl(UPLOADED),
+  caption: 'A pitcher on its vine.',
+  credit: 'Niah field team',
+};
+
 function fakeServer(
   species: SpeciesPublicRow[] | null = [speciesRow()],
   records: RecordsPublicRow[] | null = [recordRow()],
+  photos: SpeciesPhotosRow[] | null = [photosRow()],
 ) {
   return {
     online: jest.fn(async (): Promise<boolean> => true),
     fetchSpecies: jest.fn(async () => species),
     fetchRecords: jest.fn(async () => records),
+    fetchPhotos: jest.fn(async () => photos),
+    photoUrl: jest.fn(photoUrl),
   } satisfies PublicCopyApi;
 }
 
 function fakePhone() {
   return {
     replacePublicCopy: jest.fn(
-      async (_species: PublicSpecies[], _records: PublicRecord[], _downloadedAt: string) => {},
+      async (
+        _species: PublicSpecies[],
+        _records: PublicRecord[],
+        _downloadedAt: string,
+        _photos?: NewPublicPhoto[] | null,
+      ) => {},
     ),
   } satisfies PublicCopyStore;
 }
@@ -290,6 +338,108 @@ describe('recordsFromServer', () => {
   });
 });
 
+describe('photosFromServer', () => {
+  const slugs = new Set(['nepenthes-rafflesiana']);
+
+  it('gives the main photo of a species, with the link to where it was uploaded', () => {
+    expect(photosFromServer([photosRow()], slugs, photoUrl)).toEqual([pitcherPhoto]);
+  });
+
+  it('keeps the link to a photo on another website as it is', () => {
+    expect(photosFromServer([photosRow({ photos: [linkedPhoto()] })], slugs, photoUrl)).toEqual([
+      {
+        speciesSlug: 'nepenthes-rafflesiana',
+        url: 'https://images.example/pitcher.jpg',
+        caption: 'Pitchers in the heath forest.',
+        credit: 'A made-up photographer',
+      },
+    ]);
+  });
+
+  it('uses the photo marked as the main one, or else the first one', () => {
+    const marked = photosRow({
+      photos: [uploadedPhoto({ isPrimary: false }), linkedPhoto({ isPrimary: true })],
+    });
+    const unmarked = photosRow({
+      photos: [uploadedPhoto({ isPrimary: false }), linkedPhoto({ isPrimary: 'yes' })],
+    });
+    const [fromMarked] = photosFromServer([marked], slugs, photoUrl);
+    const [fromUnmarked] = photosFromServer([unmarked], slugs, photoUrl);
+    expect(fromMarked.url).toBe('https://images.example/pitcher.jpg');
+    expect(fromUnmarked.url).toBe(pitcherPhoto.url);
+  });
+
+  it('skips a bad photo, even one marked as the main one, and uses the next good one', () => {
+    const bad = [
+      null,
+      'a photo',
+      [uploadedPhoto()],
+      uploadedPhoto({ caption: undefined }),
+      uploadedPhoto({ credit: 3 }),
+      linkedPhoto({ url: 'http://images.example/pitcher.jpg', isPrimary: true }),
+      linkedPhoto({ url: 'https://images.example/two words.jpg' }),
+      linkedPhoto({ url: `https://images.example/${'a'.repeat(474)}.jpg` }),
+      linkedPhoto({ url: 'javascript:alert(1)' }),
+      { caption: 'No link at all', credit: '', isPrimary: true },
+    ];
+    const row = photosRow({ photos: [...bad, linkedPhoto()] });
+    expect(photosFromServer([row], slugs, photoUrl)).toEqual([
+      expect.objectContaining({ url: 'https://images.example/pitcher.jpg' }),
+    ]);
+  });
+
+  it('takes a link to another website up to 500 characters long', () => {
+    const longest = `https://images.example/${'a'.repeat(473)}.jpg`;
+    expect(longest).toHaveLength(500);
+    const row = photosRow({ photos: [linkedPhoto({ url: longest })] });
+    expect(photosFromServer([row], slugs, photoUrl)[0].url).toBe(longest);
+  });
+
+  it('only builds a link for a photo uploaded to the folder of its own species', () => {
+    const link = jest.fn(photoUrl);
+    const elsewhere = [
+      uploadedPhoto({ path: 'species/ficus-benjamina/5d0c8e2a-7b1f-4c3d-9e6a-2f4b8c1d3e5a.jpg' }),
+      uploadedPhoto({ path: 'records/5d0c8e2a-7b1f-4c3d-9e6a-2f4b8c1d3e5a.jpg' }),
+      uploadedPhoto({ path: 'species/nepenthes-rafflesiana/../../records/photo.jpg' }),
+      uploadedPhoto({ path: 'species/nepenthes-rafflesiana/photo.png' }),
+      uploadedPhoto({ path: `/${UPLOADED}` }),
+    ];
+    const both = new Set(['nepenthes-rafflesiana', 'ficus-benjamina']);
+    expect(photosFromServer([photosRow({ photos: elsewhere })], both, link)).toEqual([]);
+    expect(link).not.toHaveBeenCalled();
+  });
+
+  it('trims the caption and the credit', () => {
+    const photo = uploadedPhoto({
+      caption: '  A pitcher on its vine. ',
+      credit: ' Niah field team\n',
+    });
+    expect(photosFromServer([photosRow({ photos: [photo] })], slugs, photoUrl)).toEqual([
+      pitcherPhoto,
+    ]);
+  });
+
+  it('gives no photo to a species with no good photos, or with no list of photos', () => {
+    const rows = [
+      photosRow({ photos: [] }),
+      photosRow({ id: 'ficus-benjamina', photos: null }),
+      photosRow({ id: 'shorea-macrophylla', photos: { 0: uploadedPhoto() } }),
+    ];
+    const all = new Set(['nepenthes-rafflesiana', 'ficus-benjamina', 'shorea-macrophylla']);
+    expect(photosFromServer(rows, all, photoUrl)).toEqual([]);
+  });
+
+  it('leaves out species not in the plant info, and a second row for the same species', () => {
+    const rows = [
+      photosRow({ id: 'not-in-the-plant-info', photos: [linkedPhoto()] }),
+      photosRow(),
+      photosRow({ photos: [linkedPhoto()] }),
+      photosRow({ id: null }),
+    ];
+    expect(photosFromServer(rows, slugs, photoUrl)).toEqual([pitcherPhoto]);
+  });
+});
+
 describe('downloadPublicCopy', () => {
   beforeEach(() => {
     jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -303,7 +453,9 @@ describe('downloadPublicCopy', () => {
     const phone = fakePhone();
     expect(await downloadPublicCopy(fakeServer(), phone, now)).toBe('done');
     expect(phone.replacePublicCopy).toHaveBeenCalledTimes(1);
-    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED);
+    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED, [
+      pitcherPhoto,
+    ]);
     expect(console.warn).not.toHaveBeenCalled();
   });
 
@@ -312,7 +464,9 @@ describe('downloadPublicCopy', () => {
     try {
       const phone = fakePhone();
       await downloadPublicCopy(fakeServer(), phone);
-      expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED);
+      expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED, [
+        pitcherPhoto,
+      ]);
     } finally {
       jest.useRealTimers();
     }
@@ -325,6 +479,7 @@ describe('downloadPublicCopy', () => {
     expect(await downloadPublicCopy(server, phone, now)).toBe('offline');
     expect(server.fetchSpecies).not.toHaveBeenCalled();
     expect(server.fetchRecords).not.toHaveBeenCalled();
+    expect(server.fetchPhotos).not.toHaveBeenCalled();
     expect(phone.replacePublicCopy).not.toHaveBeenCalled();
   });
 
@@ -333,12 +488,15 @@ describe('downloadPublicCopy', () => {
     const phone = fakePhone();
     expect(await downloadPublicCopy(server, phone, now)).toBe('failed');
     expect(server.fetchRecords).not.toHaveBeenCalled();
+    expect(server.fetchPhotos).not.toHaveBeenCalled();
     expect(phone.replacePublicCopy).not.toHaveBeenCalled();
   });
 
   it("keeps the old copy when the records couldn't be read", async () => {
+    const server = fakeServer(undefined, null);
     const phone = fakePhone();
-    expect(await downloadPublicCopy(fakeServer(undefined, null), phone, now)).toBe('failed');
+    expect(await downloadPublicCopy(server, phone, now)).toBe('failed');
+    expect(server.fetchPhotos).not.toHaveBeenCalled();
     expect(phone.replacePublicCopy).not.toHaveBeenCalled();
   });
 
@@ -354,7 +512,43 @@ describe('downloadPublicCopy', () => {
   it('takes a download with species and no records', async () => {
     const phone = fakePhone();
     expect(await downloadPublicCopy(fakeServer(undefined, []), phone, now)).toBe('done');
-    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [], DOWNLOADED);
+    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [], DOWNLOADED, [pitcherPhoto]);
+  });
+
+  it('asks for the photo lists last, and builds the links to uploaded photos', async () => {
+    const server = fakeServer();
+    await downloadPublicCopy(server, fakePhone(), now);
+    expect(server.fetchPhotos).toHaveBeenCalledTimes(1);
+    const [recordsAsked] = server.fetchRecords.mock.invocationCallOrder;
+    const [photosAsked] = server.fetchPhotos.mock.invocationCallOrder;
+    expect(photosAsked).toBeGreaterThan(recordsAsked);
+    expect(server.photoUrl).toHaveBeenCalledWith(UPLOADED);
+  });
+
+  it("still saves the plant info when the photo lists couldn't be read", async () => {
+    const phone = fakePhone();
+    const server = fakeServer(undefined, undefined, null);
+    expect(await downloadPublicCopy(server, phone, now)).toBe('done');
+    // No list keeps the photos already saved, where an empty list would clear them.
+    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED, null);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('still saves the plant info, and warns, when reading the photo lists throws', async () => {
+    const server = fakeServer();
+    const broken = new Error('The photo list is broken');
+    server.fetchPhotos.mockRejectedValue(broken);
+    const phone = fakePhone();
+    expect(await downloadPublicCopy(server, phone, now)).toBe('done');
+    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED, null);
+    expect(console.warn).toHaveBeenCalledWith("Couldn't download the species photos.", broken);
+  });
+
+  it('saves an empty photo list when no species has a photo any more', async () => {
+    const phone = fakePhone();
+    const server = fakeServer(undefined, undefined, [photosRow({ photos: [] })]);
+    expect(await downloadPublicCopy(server, phone, now)).toBe('done');
+    expect(phone.replacePublicCopy).toHaveBeenCalledWith([pitcher], [tagged], DOWNLOADED, []);
   });
 
   it('says it failed, and warns, when the phone cannot save the copy', async () => {

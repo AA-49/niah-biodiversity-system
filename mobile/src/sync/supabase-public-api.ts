@@ -1,7 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as Network from 'expo-network';
 
-import type { PublicCopyApi, RecordsPublicRow, SpeciesPublicRow } from './public-copy';
+import type {
+  PublicCopyApi,
+  RecordsPublicRow,
+  SpeciesPhotosRow,
+  SpeciesPublicRow,
+} from './public-copy';
 import { fetchAllPages } from './sync-engine';
 
 // Only the columns the plant page on the phone shows. records_public also has a location column,
@@ -11,12 +16,16 @@ const SPECIES_COLUMNS =
 const RECORD_COLUMNS =
   'id, tag_code, species_slug, species_name, common_name, height_m, condition, recorded_at';
 
-/** A page that couldn't be read. Null makes the whole download fail, so the old copy stays. */
-function failed(error: unknown, status: number) {
+// The website's public storage for species photos. The photos taken of each record are kept
+// somewhere else that needs a sign in, and the phone never asks for those.
+const PHOTO_BUCKET = 'botanical-photos';
+
+/** A page that couldn't be read. Null makes that list fail, so the copy saved before stays. */
+function failed(error: unknown, status: number, message = "Couldn't download the plant info.") {
   // No answer at all is just no signal. An answer with an error won't fix itself, like when the
   // server is missing a column because one of the SQL files hasn't been run, so it gets a warning.
   if (status !== 0) {
-    console.warn("Couldn't download the plant info.", error);
+    console.warn(message, error);
   }
   return null;
 }
@@ -53,6 +62,24 @@ export function supabasePublicCopyApi(supabase: SupabaseClient): PublicCopyApi {
           .range(from, to);
         return error ? failed(error, status) : (data as RecordsPublicRow[]);
       });
+    },
+
+    fetchPhotos() {
+      return fetchAllPages<SpeciesPhotosRow>(async (from, to) => {
+        // The same view of each species' photo list that the website reads.
+        const { data, error, status } = await supabase
+          .from('species_photos_public')
+          .select('id, photos')
+          .order('id')
+          .range(from, to);
+        return error
+          ? failed(error, status, "Couldn't download the species photos.")
+          : (data as SpeciesPhotosRow[]);
+      });
+    },
+
+    photoUrl(path) {
+      return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
     },
   };
 }

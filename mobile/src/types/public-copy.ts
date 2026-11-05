@@ -57,6 +57,22 @@ export type PublicCopy = {
   downloadedAt: string | null;
 };
 
+/** The main photo of a species in the saved plant info, the one the website shows first. */
+export type PublicPhoto = {
+  speciesSlug: string;
+  /** Where the photo is on the server. A new link means the photo changed. */
+  url: string;
+  /** Says what the photo shows. Can be empty. */
+  caption: string;
+  /** Who took the photo. Can be empty. */
+  credit: string;
+  /** The name of the copy saved on the phone, missing until the photo has come down. */
+  file?: string;
+};
+
+/** A photo as the server lists it, before the phone has a copy. */
+export type NewPublicPhoto = Omit<PublicPhoto, 'file'>;
+
 /** A tag this phone scanned. Scans stay on the phone and never go to the server. */
 export type ScanEntry = {
   tagCode: string;

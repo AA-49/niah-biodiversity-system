@@ -3,15 +3,28 @@ import { createContext, use, useEffect, useRef, useState, type ReactNode } from 
 import { AppState } from 'react-native';
 
 import { announce } from '@/lib/announce';
+import {
+  deleteSpeciesPhoto,
+  downloadSpeciesPhoto,
+  removeStraySpeciesPhotos,
+} from '@/lib/species-photo-files';
 import { getSupabase } from '@/lib/supabase';
 import { useRecords } from '@/state/records-context';
-import { downloadMessage, downloadPublicCopy, type DownloadOutcome } from '@/sync/public-copy';
+import {
+  downloadMessage,
+  downloadPublicCopy,
+  type DownloadOutcome,
+  type PublicCopyApi,
+} from '@/sync/public-copy';
+import { downloadMissingPhotos } from '@/sync/public-photos';
 import { supabasePublicCopyApi } from '@/sync/supabase-public-api';
 
 // Decides when to download the plant info that visitors read (src/sync/public-copy.ts does the
 // download). Visitors need it to scan tags with no signal, and staff scans fall back to it, so it
 // runs in both modes, but not until someone has picked one. Nobody has to be signed in. Like
 // syncing, it only runs while the app is open, which docs/sync-design.md lists under Known limits.
+// After each download that works, it gets the species photos that aren't on the phone yet as well
+// (src/sync/public-photos.ts does that part).
 
 /** How often to download again while the app is open, so new records show up without a restart. */
 const UPDATE_EVERY_MS = 10 * 60 * 1000;
@@ -37,7 +50,8 @@ type PublicCopyContextValue = {
 const PublicCopyContext = createContext<PublicCopyContextValue | null>(null);
 
 export function PublicCopyProvider({ children }: { children: ReactNode }) {
-  const { mode, publicCopyAt, replacePublicCopy } = useRecords();
+  const { mode, publicCopyAt, replacePublicCopy, loadPublicPhotos, savePublicPhotoFile } =
+    useRecords();
   const hasMode = mode !== null;
   const canUpdate = Boolean(getSupabase());
 
@@ -59,6 +73,36 @@ export function PublicCopyProvider({ children }: { children: ReactNode }) {
   // The same as lastOutcome, for the network listener. The listener keeps the values from the
   // render it was made in, so it can't read lastOutcome itself.
   const outcomeRef = useRef<DownloadOutcome | null>(null);
+  // One round of photo downloads at a time. Each round ends by deleting the files no saved photo
+  // points to, and that would catch a photo another round is still downloading.
+  const photosBusy = useRef(false);
+  // The plant info updated during a round, so there may be new photos to get once it's done.
+  const photosAgain = useRef(false);
+
+  /** Downloads the species photos that aren't on the phone yet. Never throws. */
+  async function downloadPhotos(api: PublicCopyApi) {
+    if (photosBusy.current) {
+      photosAgain.current = true;
+      return;
+    }
+    photosBusy.current = true;
+    do {
+      photosAgain.current = false;
+      try {
+        await downloadMissingPhotos({
+          online: api.online,
+          loadPhotos: loadPublicPhotos,
+          download: downloadSpeciesPhoto,
+          saveFile: savePublicPhotoFile,
+          deleteFile: deleteSpeciesPhoto,
+          removeStray: removeStraySpeciesPhotos,
+        });
+      } catch (error) {
+        console.warn("Couldn't download the species photos.", error);
+      }
+    } while (photosAgain.current);
+    photosBusy.current = false;
+  }
 
   async function run(manual: boolean) {
     const supabase = getSupabase();
@@ -69,13 +113,14 @@ export function PublicCopyProvider({ children }: { children: ReactNode }) {
     setRunning(true);
     try {
       const hadCopy = publicCopyAt !== null;
-      const outcome = await downloadPublicCopy(supabasePublicCopyApi(supabase), {
-        replacePublicCopy,
-      });
+      const api = supabasePublicCopyApi(supabase);
+      const outcome = await downloadPublicCopy(api, { replacePublicCopy });
       outcomeRef.current = outcome;
       setLastOutcome(outcome);
       if (outcome === 'done') {
         lastWorked.current = Date.now();
+        // The plant info works without the photos, so nothing here waits for them.
+        downloadPhotos(api);
       }
       if (manual) {
         const text = downloadMessage(outcome, hadCopy);
