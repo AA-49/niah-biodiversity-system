@@ -16,12 +16,15 @@ import { deletePhotoFile, removeStrayPhotos } from '@/lib/photo-files';
 import type { UploadOutcome } from '@/sync/upload-row';
 import type { AppMode } from '@/types/app-mode';
 import type { NewPlantRecord, PhotoOutcome, PlantRecord, RecordPhoto } from '@/types/plant-record';
+import type { PublicCopy, PublicRecord, PublicSpecies } from '@/types/public-copy';
 
 // Records are saved in SQLite on the phone (src/db), so they're still there after the app
 // restarts or the phone runs out of battery. The species list downloaded when the phone syncs is
 // saved there too. src/state/sync-context.tsx uploads and downloads them, using the functions here.
 // Whether the phone is used by a visitor or by park staff is saved there as well, and it picks
-// the tabs.
+// the tabs. So is a copy of the plant info on the public website, which lets a visitor scan a tag
+// with no signal. src/state/public-copy-context.tsx downloads it, and it's kept apart from the
+// records staff make.
 
 type RecordsContextValue = {
   /** Newest first. */
@@ -92,6 +95,21 @@ type RecordsContextValue = {
   mode: AppMode | null;
   /** Saves the pick on the phone, then switches the app over. If saving fails it throws. */
   setMode: (mode: AppMode) => Promise<void>;
+  /** The species the public website shows, from the last plant info download. */
+  publicSpecies: PublicSpecies[];
+  /** The published records from the same download, without their locations. */
+  publicRecords: PublicRecord[];
+  /** When the plant info last came down (ISO 8601), or null if it never has. */
+  publicCopyAt: string | null;
+  /**
+   * Saves downloaded plant info on the phone in place of the old copy. If that fails it throws and
+   * the old copy stays.
+   */
+  replacePublicCopy: (
+    species: PublicSpecies[],
+    records: PublicRecord[],
+    downloadedAt: string,
+  ) => Promise<void>;
 };
 
 type StoreState =
@@ -104,6 +122,7 @@ type StoreState =
       saved: PlantRecord[];
       photos: RecordPhoto[];
       species: SpeciesOption[];
+      publicCopy: PublicCopy;
       mode: AppMode | null;
     };
 
@@ -182,15 +201,17 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
           saved,
           photos: await store.loadPhotos(),
           species: await store.loadSpecies(),
+          publicCopy: await store.loadPublicCopy(),
+          // Last, because it's the only one that can write.
           mode: await startingMode(store, saved),
         };
       })
       .then(
-        ({ store, saved, photos, species, mode }) => {
+        ({ store, saved, photos, species, publicCopy, mode }) => {
           // Before the form can show, so this can't take a photo that's on the form.
           removeStrayPhotos(photos.map((photo) => photo.path));
           if (active) {
-            setState({ status: 'ready', store, saved, photos, species, mode });
+            setState({ status: 'ready', store, saved, photos, species, publicCopy, mode });
           }
         },
         (error: unknown) => {
@@ -471,6 +492,16 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     setState((current) => (current.status === 'ready' ? { ...current, mode } : current));
   }
 
+  async function replacePublicCopy(
+    newSpecies: PublicSpecies[],
+    newRecords: PublicRecord[],
+    downloadedAt: string,
+  ) {
+    await store.replacePublicCopy(newSpecies, newRecords, downloadedAt);
+    const publicCopy = { species: newSpecies, records: newRecords, downloadedAt };
+    setState((current) => (current.status === 'ready' ? { ...current, publicCopy } : current));
+  }
+
   return (
     <RecordsContext
       value={{
@@ -500,6 +531,10 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
         replaceSpecies,
         mode: state.mode,
         setMode,
+        publicSpecies: state.publicCopy.species,
+        publicRecords: state.publicCopy.records,
+        publicCopyAt: state.publicCopy.downloadedAt,
+        replacePublicCopy,
       }}>
       {children}
     </RecordsContext>

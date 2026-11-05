@@ -6,11 +6,19 @@ import { isAppMode, type AppMode } from '@/types/app-mode';
 import type {
   PhotoOutcome,
   PhotoProblem,
+  PlantCondition,
   PlantRecord,
   RecordPhoto,
   ReviewStatus,
   UploadProblem,
 } from '@/types/plant-record';
+import type {
+  IucnCode,
+  PublicCopy,
+  PublicRecord,
+  PublicSpecies,
+  ScanEntry,
+} from '@/types/public-copy';
 
 import { BUSY_TIMEOUT_MS, openDatabase } from './database';
 import { unlockConnection } from './encryption';
@@ -22,7 +30,10 @@ export type RecordReview = {
   notes: string | null;
 };
 
-/** The records saved on this phone, and the species list downloaded with them. */
+/**
+ * The records saved on this phone and the species list downloaded with them, plus the copy of the
+ * public plant info and the tags scanned on this phone.
+ */
 export type RecordsStore = {
   /** Every saved record, newest first. */
   loadRecords: () => Promise<PlantRecord[]>;
@@ -81,6 +92,28 @@ export type RecordsStore = {
    */
   replaceSpecies: (list: SpeciesOption[]) => Promise<void>;
   /**
+   * The public plant info from the last download, in the order it came down, and when it came
+   * down. Empty with no time if there hasn't been one. It only reads, so it can run while the app
+   * opens.
+   */
+  loadPublicCopy: () => Promise<PublicCopy>;
+  /**
+   * Swaps the saved public plant info for a new download in one go, together with when it came
+   * down. If any species or record in it can't be saved, nothing changes and the old copy stays.
+   * Turns down a download with no species.
+   */
+  replacePublicCopy: (
+    species: PublicSpecies[],
+    records: PublicRecord[],
+    downloadedAt: string,
+  ) => Promise<void>;
+  /** The tags scanned on this phone, the latest scan first. */
+  loadScans: () => Promise<ScanEntry[]>;
+  /** Saves a scan. A tag scanned again moves up to the top instead of being listed twice. */
+  saveScan: (tagCode: string, scannedAt: string) => Promise<void>;
+  /** Forgets every scan on this phone. */
+  clearScans: () => Promise<void>;
+  /**
    * Whether this phone is used by a visitor or by park staff, or null if nobody has picked yet.
    * Anything else saved there also counts as not picked, so the app asks again.
    */
@@ -96,6 +129,11 @@ export const NOT_TAG_CLASH = 'Only a record whose tag code was taken can get a n
 // read a table, so an empty download is much more likely to be that than every species being gone.
 export const EMPTY_SPECIES_LIST =
   'The species list that came down was empty, so the old one stays.';
+
+// The same goes for the public plant info. A download with no records is fine, though, because the
+// park might not have published any yet.
+export const EMPTY_PUBLIC_COPY =
+  'The plant info that came down had no species, so the old copy stays.';
 
 // How many times a transaction on its own connection is tried when the database is busy, and how
 // long it waits before the next try (this many milliseconds times the try it's on).
@@ -183,6 +221,40 @@ type SpeciesRow = {
   common_names: string;
 };
 
+/** One row of public_species. The common names are a JSON array, and protected is 0 or 1. */
+type PublicSpeciesRow = {
+  slug: string;
+  scientific_name: string;
+  authority: string;
+  family: string;
+  common_names: string;
+  iucn_code: IucnCode;
+  sarawak_protected: number;
+  newer_name: string | null;
+  summary: string;
+  about: string;
+  habitat: string;
+  uses: string;
+};
+
+/** One row of public_records. */
+type PublicRecordRow = {
+  id: string;
+  tag_code: string;
+  species_slug: string | null;
+  species_name: string;
+  common_name: string | null;
+  height_m: number | null;
+  condition: PlantCondition | null;
+  recorded_at: string;
+};
+
+/** One row of scan_history. */
+type ScanRow = {
+  tag_code: string;
+  scanned_at: string;
+};
+
 function toRecord(row: RecordRow): PlantRecord {
   const { latitude, longitude, accuracy_m: accuracyM, captured_at: capturedAt } = row;
   return {
@@ -258,6 +330,36 @@ function toSpecies(row: SpeciesRow): SpeciesOption {
     slug: row.slug,
     scientificName: row.scientific_name,
     commonNames: JSON.parse(row.common_names) as string[],
+  };
+}
+
+function toPublicSpecies(row: PublicSpeciesRow): PublicSpecies {
+  return {
+    slug: row.slug,
+    scientificName: row.scientific_name,
+    authority: row.authority,
+    family: row.family,
+    commonNames: JSON.parse(row.common_names) as string[],
+    iucnCode: row.iucn_code,
+    sarawakProtected: row.sarawak_protected === 1,
+    newerName: row.newer_name ?? undefined,
+    summary: row.summary,
+    about: row.about,
+    habitat: row.habitat,
+    uses: row.uses,
+  };
+}
+
+function toPublicRecord(row: PublicRecordRow): PublicRecord {
+  return {
+    id: row.id,
+    tagCode: row.tag_code,
+    speciesSlug: row.species_slug ?? undefined,
+    speciesName: row.species_name,
+    commonName: row.common_name ?? undefined,
+    heightM: row.height_m ?? undefined,
+    condition: row.condition ?? undefined,
+    recordedAt: row.recorded_at,
   };
 }
 
@@ -445,6 +547,104 @@ export async function openRecordsStore(): Promise<RecordsStore> {
           );
         }
       });
+    },
+
+    async loadPublicCopy() {
+      // The rows go in the order the copy came down, so rowid keeps that order. These are three
+      // reads and not one, but nothing replaces the copy until the app has finished opening.
+      const species = await db.getAllAsync<PublicSpeciesRow>(
+        'SELECT * FROM public_species ORDER BY rowid',
+      );
+      const records = await db.getAllAsync<PublicRecordRow>(
+        'SELECT * FROM public_records ORDER BY rowid',
+      );
+      const downloaded = await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM sync_meta WHERE key = 'public_copy_at'",
+      );
+      return {
+        species: species.map(toPublicSpecies),
+        records: records.map(toPublicRecord),
+        downloadedAt: downloaded?.value ?? null,
+      };
+    },
+
+    async replacePublicCopy(species, records, downloadedAt) {
+      if (species.length === 0) {
+        throw new Error(EMPTY_PUBLIC_COPY);
+      }
+      // The time goes in the same transaction, so it always says when the saved copy came down.
+      // It has its own key and not last_synced, because a phone that has synced counts as a staff
+      // phone when the app opens.
+      await inOwnTransaction(db, async (txn) => {
+        await txn.runAsync('DELETE FROM public_species');
+        await txn.runAsync('DELETE FROM public_records');
+        for (const item of species) {
+          await txn.runAsync(
+            `INSERT INTO public_species (slug, scientific_name, authority, family, common_names,
+              iucn_code, sarawak_protected, newer_name, summary, about, habitat, uses)
+            VALUES ($slug, $scientificName, $authority, $family, $commonNames, $iucnCode,
+              $sarawakProtected, $newerName, $summary, $about, $habitat, $uses)`,
+            {
+              $slug: item.slug,
+              $scientificName: item.scientificName,
+              $authority: item.authority,
+              $family: item.family,
+              $commonNames: JSON.stringify(item.commonNames),
+              $iucnCode: item.iucnCode,
+              $sarawakProtected: item.sarawakProtected ? 1 : 0,
+              $newerName: item.newerName ?? null,
+              $summary: item.summary,
+              $about: item.about,
+              $habitat: item.habitat,
+              $uses: item.uses,
+            },
+          );
+        }
+        for (const record of records) {
+          await txn.runAsync(
+            `INSERT INTO public_records (id, tag_code, species_slug, species_name, common_name,
+              height_m, condition, recorded_at)
+            VALUES ($id, $tagCode, $speciesSlug, $speciesName, $commonName, $heightM, $condition,
+              $recordedAt)`,
+            {
+              $id: record.id,
+              $tagCode: record.tagCode,
+              $speciesSlug: record.speciesSlug ?? null,
+              $speciesName: record.speciesName,
+              $commonName: record.commonName ?? null,
+              $heightM: record.heightM ?? null,
+              $condition: record.condition ?? null,
+              $recordedAt: record.recordedAt,
+            },
+          );
+        }
+        await txn.runAsync(
+          `INSERT INTO sync_meta (key, value) VALUES ('public_copy_at', $value)
+          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+          { $value: downloadedAt },
+        );
+      });
+    },
+
+    async loadScans() {
+      // A tag scanned again keeps its rowid, so rowid only matters for two scans in the same
+      // millisecond.
+      const rows = await db.getAllAsync<ScanRow>(
+        'SELECT tag_code, scanned_at FROM scan_history ORDER BY scanned_at DESC, rowid DESC',
+      );
+      return rows.map((row) => ({ tagCode: row.tag_code, scannedAt: row.scanned_at }));
+    },
+
+    async saveScan(tagCode, scannedAt) {
+      await db.runAsync(
+        `INSERT INTO scan_history (tag_code, scanned_at) VALUES ($tagCode, $scannedAt)
+        ON CONFLICT (tag_code) DO UPDATE SET scanned_at = excluded.scanned_at`,
+        { $tagCode: tagCode, $scannedAt: scannedAt },
+      );
+    },
+
+    async clearScans() {
+      await db.runAsync('DELETE FROM scan_history');
     },
 
     async loadMode() {

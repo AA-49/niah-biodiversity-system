@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AccountProvider } from '@/state/account-context';
+import { PublicCopyProvider } from '@/state/public-copy-context';
 import { RecordsProvider, useRecords } from '@/state/records-context';
 import { SyncProvider } from '@/state/sync-context';
 
@@ -63,7 +64,9 @@ export default function RootLayout() {
       <AccountProvider>
         <RecordsProvider>
           <SyncProvider>
-            <RootStack tint={colors.primary} />
+            <PublicCopyProvider>
+              <RootStack tint={colors.primary} />
+            </PublicCopyProvider>
           </SyncProvider>
         </RecordsProvider>
       </AccountProvider>
