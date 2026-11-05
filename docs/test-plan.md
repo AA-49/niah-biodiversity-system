@@ -88,7 +88,7 @@ The Basic Functionalities in the Scope, and where each one is tested.
 | Field app | Record the GPS location | [Item 8](test-results/item-8-gps.md) |
 | Field app | Sync with the central database | [Item 10](test-results/item-10-sync.md) |
 | Field app | Generate a QR code for each record | [Item 12](test-results/item-12-qr.md) |
-| Field app | Scan QR tags, and collect data offline | [Item 6](test-results/item-6-qr-scanner.md), [Item 9](test-results/item-9-offline-storage.md) |
+| Field app | Scan QR tags, and collect data offline | [Item 6](test-results/item-6-qr-scanner.md), [Item 9](test-results/item-9-offline-storage.md), [Visitor offline](test-results/visitor-offline.md) |
 | Website | Add, edit and delete species | [Item 14](test-results/item-14-plant-schema.md), [Item 17](test-results/item-17-plant-edit-delete.md) |
 | Website | Upload photographs and supporting information | [Item 18](test-results/item-18-photo-gallery.md) |
 | Website | Review and approve observations | [Item 19](test-results/item-19-observation-approval.md) |

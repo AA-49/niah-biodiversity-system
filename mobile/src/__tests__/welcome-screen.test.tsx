@@ -8,9 +8,11 @@ import TabLayout from '@/app/(tabs)/_layout';
 import HomeScreen from '@/app/(tabs)/index';
 import ProfileScreen from '@/app/(tabs)/profile';
 import WelcomeScreen from '@/app/welcome';
+import { MOCK_RECORDS } from '@/data/mock-records';
 import { DATABASE_NAME, openDatabase } from '@/db/database';
 import { openRecordsStore } from '@/db/records-store';
 import { SWITCH_FAILED } from '@/hooks/use-switch-mode';
+import type { AppMode } from '@/types/app-mode';
 import type { PlantRecord } from '@/types/plant-record';
 
 jest.mock('expo-network', () => ({
@@ -37,8 +39,8 @@ function StandIn({ name }: { name: string }) {
 
 // The real root layout, welcome page, tab bar, Home and Profile. The other pages have their own
 // tests, and some need the camera or GPS, so simple stand-ins take their place.
-function renderApp() {
-  renderRouter(
+function renderApp(initialUrl = '/') {
+  return renderRouter(
     {
       _layout: { default: RootLayout, unstable_settings },
       welcome: WelcomeScreen,
@@ -54,7 +56,7 @@ function renderApp() {
       'plant/[tag]': () => <StandIn name="Plant page" />,
       'species/[slug]': () => <StandIn name="Species page" />,
     },
-    { initialUrl: '/' },
+    { initialUrl },
   );
 }
 
@@ -87,6 +89,13 @@ async function pick(choice: RegExp) {
   await act(async () => {
     fireEvent.press(button);
   });
+}
+
+// Saves a pick made the last time the app was open.
+async function savePick(mode: AppMode) {
+  const store = await openRecordsStore();
+  await store.saveMode(mode);
+  await store.close();
 }
 
 beforeEach(async () => {
@@ -253,5 +262,83 @@ describe('switching later', () => {
     await pick(/^I'm visiting the park/);
     expect(tabTitles()).toEqual(VISITOR_TABS);
     expect(await screen.findByText('Work at the park?')).toBeVisible();
+  });
+});
+
+// The tab bar leaves out the tabs a mode doesn't get, and the root stack leaves out the pages it
+// doesn't get, so a link to one of them opens Home instead.
+describe('links to pages for the other mode', () => {
+  it("won't open New Record, My Records or a staff record for a visitor", async () => {
+    const app = renderApp();
+    await pick(/^I'm visiting the park/);
+    await screen.findByText('Plant guide');
+
+    act(() => router.navigate('/new-record'));
+    expect(app.getPathname()).toBe('/');
+    act(() => router.navigate('/records'));
+    expect(app.getPathname()).toBe('/');
+    // Development builds list the sample records, so this record is on the phone.
+    act(() => router.navigate({ pathname: '/record/[id]', params: { id: MOCK_RECORDS[0].id } }));
+    expect(app.getPathname()).toBe('/');
+    expect(screen.getByText('Plant guide')).toBeVisible();
+    expect(screen.queryByText('New record page')).toBeNull();
+    expect(screen.queryByText('Records page')).toBeNull();
+    expect(screen.queryByText('Record page')).toBeNull();
+
+    // A tab visitors do get still opens, so the links above really were turned away.
+    act(() => router.navigate('/plants'));
+    expect(app.getPathname()).toBe('/plants');
+  });
+
+  it("won't open Plants or History for staff", async () => {
+    const app = renderApp();
+    await pick(/^I work at the park/);
+    await screen.findByText('Ground-truthing');
+
+    act(() => router.navigate('/plants'));
+    expect(app.getPathname()).toBe('/');
+    act(() => router.navigate('/history'));
+    expect(app.getPathname()).toBe('/');
+    expect(screen.getByText('Ground-truthing')).toBeVisible();
+    expect(screen.queryByText('Plants page')).toBeNull();
+    expect(screen.queryByText('History page')).toBeNull();
+
+    act(() => router.navigate('/records'));
+    expect(app.getPathname()).toBe('/records');
+  });
+
+  it.each([
+    { page: 'New Record', link: '/new-record' },
+    { page: 'My Records', link: '/records' },
+    { page: 'a staff record', link: `/record/${MOCK_RECORDS[0].id}` },
+    { page: 'the welcome page', link: '/welcome' },
+  ])('opens Home for a visitor when a link to $page opens the app', async ({ link }) => {
+    await savePick('visitor');
+    const app = renderApp(link);
+    expect(await screen.findByText('Plant guide')).toBeVisible();
+    expect(app.getPathname()).toBe('/');
+    expect(tabTitles()).toEqual(VISITOR_TABS);
+  });
+
+  it.each([
+    { page: 'Plants', link: '/plants' },
+    { page: 'History', link: '/history' },
+    { page: 'the welcome page', link: '/welcome' },
+  ])('opens Home for staff when a link to $page opens the app', async ({ link }) => {
+    await savePick('staff');
+    const app = renderApp(link);
+    expect(await screen.findByText('Ground-truthing')).toBeVisible();
+    expect(app.getPathname()).toBe('/');
+    expect(tabTitles()).toEqual(STAFF_TABS);
+  });
+
+  it('asks who is using the app first when a link opens it on a new phone', async () => {
+    const app = renderApp('/plant/NNP-A1B2C3');
+    expect(await screen.findByText('Welcome')).toBeVisible();
+    expect(screen.queryByText('Plant page')).toBeNull();
+
+    await pick(/^I'm visiting the park/);
+    expect(await screen.findByText('Plant guide')).toBeVisible();
+    expect(app.getPathname()).toBe('/');
   });
 });
