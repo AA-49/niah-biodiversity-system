@@ -211,6 +211,10 @@ in `src/lib`, and the upload rules and every path through a sync in `src/sync` (
 against the same example records as the SQL tests in `supabase/tests/`). They also make sure the
 mock data follows the same rules as the app.
 
+`src/sync/__tests__/stalled-server.test.ts` runs the real supabase-js client against a server
+that never answers, with fake timers, to check that its requests stop after their time limit and
+count as no signal.
+
 The visitor tests cover the first page and switching between visitor and staff, when the plant
 info downloads and what it saves, the species photos, the scan lookups, and the Plants, History,
 plant and species pages. `supabase/tests/visitor-reads.test.js` checks the phone's reads against

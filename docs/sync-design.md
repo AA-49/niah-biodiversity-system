@@ -301,6 +301,37 @@ newest first. A tag with no plant info yet goes in too, so they can look again a
 Run every SQL file up to 021 on the hosted project before visitors use this. See
 [`supabase/README.md`](../supabase/README.md) for where the hosted project is up to.
 
+## Requests that get no answer
+
+Wi-Fi with no internet behind it, or a weak signal, can leave a request sitting there with no
+answer. Before 5 Nov the app set no time limit of its own, so Update now or Sync now could keep
+going for as long as the phone kept waiting. Now the client in `mobile/src/lib/supabase.ts` sends
+every request through one fetch with a time limit (`mobile/src/lib/time-limit.ts`). That covers
+the session check, record and photo uploads, reading back the reviews, the species list and the
+plant info downloads.
+
+- A request gets 30 seconds from when it's sent until the whole answer is back. A photo upload
+  gets a minute, the same as a species photo download, since it sends the whole photo.
+- A request that runs out of time counts as no signal. Update now says it couldn't update the
+  plant info, and the copy on the phone stays. A sync stops the same way it does with no signal,
+  and the records and photos stay waiting for the next one. If it runs out while reading back the
+  reviews or the species list, the sync finishes but doesn't count as a whole sync, like any other
+  failed download in steps 3 or 4.
+- supabase-js tries a failed read 3 more times, waiting 1, 2 and then 4 seconds, unless the
+  request was stopped on purpose. A request stopped for taking too long counts as stopped on
+  purpose, so it gives up after 30 seconds instead of being tried 3 more times.
+- Checking the session with an expired token means asking the server for a new one. With no
+  answer that gives up after 30 seconds and counts as no signal, so the person stays signed in and
+  it's tried again later.
+
+`mobile/src/sync/__tests__/stalled-server.test.ts` runs the real supabase-js client against a
+server that never answers, with fake timers. It checks what each of these requests gives back when
+it runs out of time, and that none of them is tried again. On 5 Nov 2026 we also tried it in the
+iOS simulator on Umer's Mac, against the stand-in. We paused the stand-in with
+`kill -STOP` so it stopped answering, then pressed Update now. "Updating..." was still showing at
+21 seconds, and by 36 seconds it said it couldn't update the plant info, with Last updated the
+same as before. After `kill -CONT` Update now worked again.
+
 ## Known limits
 
 - **Fixed on 29 Oct:** if an officer deleted a record before the phone had marked it synced, the
@@ -337,6 +368,9 @@ Run every SQL file up to 021 on the hosted project before visitors use this. See
   column to ask for only what changed.
 - A phone can look connected with no real signal. The download then fails instead of finding no
   signal, so Update now says it couldn't update the plant info rather than that there's no signal.
+- The time limit counts from when a request is sent, so a connection that's slow but working is
+  stopped too if one request takes over 30 seconds. The plant info comes down 500 rows a page and
+  each page gets its own 30 seconds, so a download of many pages can take longer than that in all.
 - Only the main photo of each species comes down, at full size, so a species page on the phone
   shows one photo where the website's species page can show more.
 

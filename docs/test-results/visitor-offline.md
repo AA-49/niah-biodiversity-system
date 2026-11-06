@@ -152,7 +152,8 @@ Nothing in the app needed a fix. The `jest/` list in `mobile/README.md` had been
   `mobile/src/state/__tests__/public-copy-context.test.tsx` covers when the others run.
 - **A staff scan falling back to the saved plant info.** Jest covers it, under "Staff scanning a
   tag" in `scan-plant-info.test.tsx`.
-- **A connection that stalls** instead of failing. See Known limits.
+- **A connection that stalls** instead of failing wasn't tried in this round. See Known limits
+  for the time limit added after it, and how it was checked.
 - **Android, the web build, dark mode and a screen reader.**
 - **Hosted Supabase and a real phone.** Nothing was tried against the hosted project. It needs the
   SQL files run in order first, see [supabase/README.md](../../supabase/README.md).
@@ -163,11 +164,14 @@ Nothing in the app needed a fix. The `jest/` list in `mobile/README.md` had been
   open, so a phone first opened in the park with no signal has nothing to show until it gets signal.
 - **A phone that looks connected but has no real signal** gets the couldn't update message instead
   of the no signal one, like the simulator here.
-- **The app sets no time limit on the plant info requests** (going by the code), while a photo stops
-  after a minute. supabase-js tries a failed read up to 3 more times, waiting 1, 2 and then 4
-  seconds, which is why Update now took several seconds with the stand-in stopped. A request that
-  stalls instead of failing would keep "Updating..." on screen for as long as the phone keeps
-  waiting, and no other update starts meanwhile. We didn't try that.
+- **Fixed on 5 Nov, after this round:** the build tested here set no time limit of its own on its
+  requests. On the `visitor-time-limits` branch, a request with no answer is stopped after 30
+  seconds, or a minute for a photo upload, and counts as no signal. `stalled-server.test.ts` in
+  `mobile/src/sync/__tests__` covers it, and in the simulator, with the stand-in paused, Update now
+  said it couldn't update the plant info somewhere between 21 and 36 seconds in. See "Requests that
+  get no answer" in [docs/sync-design.md](../sync-design.md).
+- **A read that fails straight away is still tried up to 3 more times**, waiting 1, 2 and then 4
+  seconds, which is why Update now took several seconds with the stand-in stopped.
 - **Every update gets the whole plant info again**, because `records_public` has no `updated_at`
   column.
 - **Only the main photo of each species comes down, at full size.**
