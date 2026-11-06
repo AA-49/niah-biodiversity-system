@@ -16,6 +16,37 @@ import { classifyPhotoUpload } from './upload-row';
 // The private bucket from supabase/005_phone_sync.sql.
 const RECORD_PHOTO_BUCKET = 'record-photos';
 
+export type PublicRecordRow = {
+  id: string;
+  tag_code: string;
+  species_slug: string | null;
+  species_name: string;
+  common_name: string | null;
+  height_m: number;
+  condition: 'healthy' | 'damaged' | 'diseased' | 'dead';
+  photo_count: number;
+  recorded_at: string;
+  status: 'published' | 'waiting' | 'rejected';
+  gps: { lat: number; lng: number; accuracyM?: number } | null;
+};
+
+export async function fetchPublishedRecordByTag(
+  supabase: SupabaseClient,
+  tagCode: string,
+): Promise<PublicRecordRow | null> {
+  const { data, error } = await supabase
+    .from('records_public')
+    .select(
+      'id, tag_code, species_slug, species_name, common_name, height_m, condition, photo_count, recorded_at, status, gps',
+    )
+    .eq('tag_code', tagCode)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  return data as PublicRecordRow | null;
+}
+
 /** The real server for src/sync/sync-engine.ts. */
 export function supabaseSyncApi(supabase: SupabaseClient): SyncApi {
   return {

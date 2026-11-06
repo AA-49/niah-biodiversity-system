@@ -41,6 +41,8 @@ type RecordsContextValue = {
    * fails it throws and the list stays as it was. photoPaths come from src/lib/photo-files.ts.
    */
   addRecord: (draft: NewPlantRecord, photoPaths?: string[]) => Promise<PlantRecord>;
+  /** Caches a published record downloaded from Supabase for offline tag lookup. */
+  downloadRecord: (record: PlantRecord) => Promise<void>;
   getRecord: (id: string) => PlantRecord | undefined;
   findByTag: (input: string) => PlantRecord | undefined;
   /** The records to upload, oldest first. Never the sample records, because those aren't saved. */
@@ -328,6 +330,20 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  async function downloadRecord(record: PlantRecord) {
+    if (records.some((current) => current.id === record.id || current.tagCode === record.tagCode)) {
+      return;
+    }
+    await store.saveDownloadedRecord(record);
+    setState((current) => {
+      if (current.status !== 'ready') {
+        return current;
+      }
+      const saved = [...current.saved, record].sort(newestFirst);
+      return { ...current, saved };
+    });
+  }
+
   function photosFor(recordId: string) {
     return savedPhotos.filter((photo) => photo.recordId === recordId);
   }
@@ -445,6 +461,7 @@ export function RecordsProvider({ children }: { children: ReactNode }) {
         waitingPhotoCount,
         photoProblemCount,
         addRecord,
+        downloadRecord,
         getRecord,
         findByTag,
         loadWaiting,

@@ -48,6 +48,68 @@ npm run ios
 `npm run android` does the same for Android. iOS needs Xcode, and `LANG=en_US.UTF-8` set if CocoaPods
 complains. `ios/` and `android/` are generated and stay out of git.
 
+## Cloud testing with EAS Update
+
+EAS Update publishes JavaScript and asset changes to Expo's servers. It does not replace the
+native app binary: changes to native modules, permissions or the Expo SDK still require a new
+development or preview build. Expo Go is useful for local development, but EAS Update previews
+should be tested with a development or preview build that is configured for the same update
+channel. The `metro.config.js` file enables the `.wasm` asset support required by `expo-sqlite`
+when Expo exports the web bundle.
+
+### One-time setup
+
+From the repository root:
+
+```bash
+cd mobile
+npm install -g eas-cli
+eas login
+eas update:configure
+```
+
+`eas login` opens an Expo account session. `eas update:configure` adds the update URL, runtime
+version and Expo project ID to `app.json`. Review those changes and commit them. Do not put an
+Expo token or Supabase service-role key in the repository.
+
+Create a preview build for each platform that teammates will test:
+
+```bash
+eas build --profile preview --platform android
+eas build --profile preview --platform ios
+```
+
+Before building, add the mobile app's Supabase values to the Expo project's `preview`
+environment. The URL and anon/publishable key are safe to embed in a client app; never add the
+Supabase service-role key:
+
+```bash
+eas env:set --name EXPO_PUBLIC_SUPABASE_URL --value https://your-project-id.supabase.co --environment preview --visibility plaintext
+eas env:set --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value your-anon-or-publishable-key --environment preview --visibility plaintext
+eas env:list --environment preview
+```
+
+The app reads these values from `EXPO_PUBLIC_SUPABASE_URL` and
+`EXPO_PUBLIC_SUPABASE_ANON_KEY` when the bundle is built. Install the resulting build on the test
+phones. The build uses the `preview` channel, so it can receive updates published to that channel.
+
+Create user accounts in Supabase Dashboard > Authentication > Users, or add a sign-up flow before
+asking testers to log in. The app currently provides email/password sign-in, not account creation.
+Email confirmation and any authentication restrictions configured in Supabase still apply.
+
+### Publish a preview update
+
+After the preview build is installed, publish JavaScript and asset changes with:
+
+```bash
+eas update --channel preview --message "Sharing app with teammates"
+```
+
+Teammates then force-close and reopen the preview build to download the update. The Expo dashboard
+shows the update and its shareable details; there is not a permanent dashboard QR code that
+replaces the installed build. Share the preview-build installation link or the dashboard link with
+testers, and provide a new build when native code changes.
+
 ## What's where
 
 ```

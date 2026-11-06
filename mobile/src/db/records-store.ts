@@ -30,6 +30,8 @@ export type RecordsStore = {
    * they were taken. Fails if a saved record already has the same ID or tag code.
    */
   saveRecord: (record: PlantRecord, photoPaths?: string[]) => Promise<void>;
+  /** Caches a published record downloaded from the server without replacing local work. */
+  saveDownloadedRecord: (record: PlantRecord) => Promise<void>;
   /**
    * The records that still have to go up, oldest first so they reach the server in the order
    * they were made. Records with an upload problem are in here too, because someone may have
@@ -282,6 +284,16 @@ export async function openRecordsStore(): Promise<RecordsStore> {
           );
         }
       });
+    },
+
+    async saveDownloadedRecord(record) {
+      const existing = await db.getFirstAsync<{ id: string }>(
+        'SELECT id FROM plant_records WHERE id = $id OR tag_code = $tagCode LIMIT 1',
+        { $id: record.id, $tagCode: record.tagCode },
+      );
+      if (!existing) {
+        await insertRecord(db, record);
+      }
     },
 
     async loadWaiting() {

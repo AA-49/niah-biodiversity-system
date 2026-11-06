@@ -27,6 +27,11 @@ export async function openRecordsStore(): Promise<RecordsStore> {
         photos.push({ recordId: record.id, position: index + 1, path });
       }
     },
+    async saveDownloadedRecord(record) {
+      if (!saved.some((other) => other.id === record.id || other.tagCode === record.tagCode)) {
+        saved.unshift(record);
+      }
+    },
     async loadWaiting() {
       // Newest first turned around. Records are saved as they're made, so that's oldest first.
       return saved.filter((record) => record.syncStatus === 'pending').reverse();
