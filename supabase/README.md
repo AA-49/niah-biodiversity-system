@@ -165,6 +165,7 @@ npm test
   `tests/history.test.js` checks 013 (items 17 and 18), `tests/photo-folder.test.js` checks
   014 (item 18), `tests/downloads.test.js` checks 011, `tests/species-rough.test.js` checks 015
   (item 19), `tests/phone-reads.test.js` checks what the phone reads back when it syncs (item 10),
+  `tests/visitor-reads.test.js` checks the plant info the phone downloads for visitors,
   `tests/iot.test.js` checks 016, 017 and the node simulator (items 28, 29 and 31), and
   `tests/public-details.test.js` checks 019, `tests/record-photo-access.test.js` checks 020 and
   `tests/role-changes.test.js` checks 021 (item 26).
